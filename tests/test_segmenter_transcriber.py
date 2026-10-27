@@ -121,16 +121,14 @@ def test_build_initial_prompt():
     from confmap.transcriber import build_initial_prompt
 
     assert build_initial_prompt("", "Ada") is None
-    assert (
-        build_initial_prompt("Graphes", "Ada") == "Conférence : Graphes. Orateur : Ada."
-    )
-    assert build_initial_prompt("Graphes", "") == "Conférence : Graphes."
+    assert build_initial_prompt("Graphes", "Ada") == "Graphes. Ada."
+    assert build_initial_prompt("Graphes", "") == "Graphes."
 
 
-def test_initial_prompt_includes_glossary() -> None:
-    """Le texte des slides et notes sert de vocabulaire à Whisper, tronqué."""
-    from confmap.transcriber import GLOSSARY_MAX_CHARS, build_initial_prompt
+def test_initial_prompt_keeps_only_terms() -> None:
+    """L'amorce Whisper ne contient que des termes, pas de phrases françaises."""
+    from confmap.transcriber import build_initial_prompt
 
-    prompt = build_initial_prompt("Titre", "", "knowledge graph   Huawei " * 100)
-    assert prompt.startswith("Conférence : Titre. Vocabulaire : knowledge graph Huawei")
-    assert len(prompt) <= len("Conférence : Titre. Vocabulaire : ") + GLOSSARY_MAX_CHARS
+    slide = "Graphes de connaissances dans l'industrie\n- 2026 : en plus Huawei, Tencent, IKEA\n- Source : keynote ISWC 2026"
+    prompt = build_initial_prompt("Rethinking semantics", "", slide)
+    assert prompt == "Rethinking semantics. Huawei, Tencent, IKEA, ISWC."

@@ -19,7 +19,7 @@ TOPIC_ICONS = {
     "comparison": "⚖️",
 }
 # Sens de lecture du diagramme Mermaid selon la nature du sujet.
-MERMAID_DIRECTIONS = {"process": "LR", "timeline": "LR"}
+MERMAID_DIRECTIONS = {"process": "LR", "timeline": "LR", "comparison": "LR"}
 DEFAULT_MERMAID_DIRECTION = "TD"
 MAX_TITLE_LENGTH = 80
 FALLBACK_TITLE = "Conférence"
@@ -42,7 +42,7 @@ GROUP_GAP = 120
 GROUP_PADDING = 40
 GROUP_LABEL_EXTRA = 40
 # Disposition hiérarchique : écarts entre niveaux et entre nœuds d'un même niveau.
-HORIZONTAL_KINDS = ("timeline", "process")
+HORIZONTAL_KINDS = ("timeline", "process", "comparison")
 LEVEL_GAP = 90
 LEVEL_NODE_GAP = 50
 BOX_MARGIN = 30
@@ -397,10 +397,12 @@ def _comparison_groups(
 
 
 def _comparison_boxes(topic: dict) -> list[_Box] | None:
-    """Dispose une comparaison en colonnes (None si moins de deux éléments comparés).
+    """Dispose une comparaison de gauche à droite (None si moins de deux éléments comparés).
 
-    Un élément comparé par colonne, ses caractéristiques dessous ; les caractéristiques
-    partagées sont centrées entre leurs éléments, sous les autres.
+    Les éléments comparés sont empilés à gauche ; à droite, une colonne de
+    caractéristiques : celles du premier élément, puis les partagées, puis celles
+    du suivant... Chaque élément est centré face aux siennes : les flèches
+    (droite → gauche) s'ouvrent en éventail sans traverser de boîte.
     """
     sources, groups = _comparison_groups(topic)
     if len(sources) < 2:
@@ -410,36 +412,32 @@ def _comparison_boxes(topic: dict) -> list[_Box] | None:
         text = _node_text(node)
         width = _node_width(text)
         boxes[node["id"]] = _Box(node, text, 0, 0, width, _node_height(text, width))
-    column_width = max(b.width for b in boxes.values()) + LEVEL_NODE_GAP
-    centers = {source: index * column_width for index, source in enumerate(sources)}
+    column_x = max(boxes[s].width for s in sources) + 2 * LEVEL_GAP
+    ordered: list[str] = []
     for source in sources:
+        ordered += groups.get((source,), [])
+        for linked, members in groups.items():
+            if len(linked) > 1 and linked[0] == source:
+                ordered += members
+    ordered += groups.get((), [])
+    cursor = 0
+    for member in ordered:
+        box = boxes[member]
+        box.x, box.y = column_x, cursor
+        cursor += box.height + LEVEL_NODE_GAP // 2
+    previous_bottom = -LEVEL_NODE_GAP
+    for source in sources:
+        linked = [
+            boxes[e.get("to")]
+            for e in topic.get("edges", [])
+            if e.get("from") == source and e.get("to") in boxes
+        ]
         box = boxes[source]
-        box.x, box.y = centers[source] - box.width // 2, 0
-    header = max(boxes[s].height for s in sources) + LEVEL_GAP
-    exclusive_bottom = header
-    for linked, members in groups.items():
-        if len(linked) != 1:
-            continue
-        cursor = header
-        for member in members:
-            box = boxes[member]
-            box.x, box.y = centers[linked[0]] - box.width // 2, cursor
-            cursor += box.height + LEVEL_NODE_GAP // 2
-        exclusive_bottom = max(exclusive_bottom, cursor)
-    cursor = exclusive_bottom + LEVEL_GAP // 2
-    for linked, members in groups.items():
-        if len(linked) == 1:
-            continue
-        center = (
-            sum(centers[s] for s in linked) // len(linked)
-            if linked
-            else (len(sources) - 1) * column_width // 2
-        )
-        for member in members:
-            box = boxes[member]
-            box.x, box.y = center - box.width // 2, cursor
-            cursor += box.height + LEVEL_NODE_GAP // 2
-    return _resolve_overlaps(list(boxes.values()))
+        center = sum(b.y + b.height / 2 for b in linked) / len(linked)
+        box.x = 0
+        box.y = max(int(center - box.height / 2), previous_bottom + LEVEL_NODE_GAP)
+        previous_bottom = box.y + box.height
+    return list(boxes.values())
 
 
 def _topic_node_boxes(topic: dict) -> list[_Box]:

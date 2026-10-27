@@ -396,8 +396,8 @@ def test_canvas_levels_follow_parent_order() -> None:
     assert (boxes["A"].x < boxes["B"].x) == (boxes["a1"].x < boxes["b1"].x)
 
 
-def test_canvas_comparison_in_columns() -> None:
-    """Comparaison : éléments côte à côte en haut, caractéristique partagée dessous, au milieu."""
+def test_canvas_comparison_left_to_right() -> None:
+    """Comparaison : éléments à gauche, caractéristiques à droite, partagée entre les deux."""
     from confmap.vault_writer import _topic_node_boxes
 
     topic = {
@@ -413,8 +413,12 @@ def test_canvas_comparison_in_columns() -> None:
         ],
     }
     boxes = {box.node["id"]: box for box in _topic_node_boxes(topic)}
-    assert boxes["2018"].y == boxes["2026"].y < boxes["Google"].y
-    assert boxes["Google"].x < boxes["Huawei"].x
-    assert boxes["KG"].y > boxes["Google"].y
-    center = lambda b: b.x + b.width / 2  # noqa: E731
-    assert center(boxes["Google"]) < center(boxes["KG"]) < center(boxes["Huawei"])
+    assert (
+        boxes["2018"].x
+        == boxes["2026"].x
+        < boxes["Google"].x
+        == boxes["KG"].x
+        == boxes["Huawei"].x
+    )
+    assert boxes["2018"].y < boxes["2026"].y
+    assert boxes["Google"].y < boxes["KG"].y < boxes["Huawei"].y

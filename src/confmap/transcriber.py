@@ -57,28 +57,51 @@ class Transcriber(Protocol):
         ...
 
 
-GLOSSARY_MAX_CHARS = 600
+GLOSSARY_MAX_TERMS = 30
+_WORD = re.compile(r"[A-Za-zÀ-ÿ0-9][\w'’-]*")
+
+
+def glossary_terms(text: str) -> list[str]:
+    """Noms propres et sigles d'un texte fiable (slides, notes), sans les phrases.
+
+    Whisper recopie la langue de son amorce : on ne lui passe que des termes
+    (Huawei, ISWC, IKEA...), jamais de phrases traduites en français.
+    Retient les mots avec un chiffre ou deux majuscules, et les mots à majuscule
+    qui ne commencent pas une phrase ou une puce.
+    """
+    terms: list[str] = []
+    for sentence in re.split(r"[.!?:;\n]+|\s[-•]\s", text):
+        for index, word in enumerate(_WORD.findall(sentence)):
+            capitals = sum(char.isupper() for char in word)
+            proper = word[0].isupper() and index > 0
+            if (
+                capitals >= 2 or proper or (any(c.isdigit() for c in word) and capitals)
+            ) and word not in terms:
+                terms.append(word)
+    return terms[:GLOSSARY_MAX_TERMS]
 
 
 def build_initial_prompt(title: str, speaker: str, glossary: str = "") -> str | None:
     """Amorce Whisper avec le contexte de la conférence (None si le titre est vide).
 
+    L'amorce ne contient que le titre, l'orateur et des termes isolés, sans libellés
+    en français, pour ne pas pousser Whisper à écrire en français.
+
     Args:
         title: Titre de la conférence.
         speaker: Orateur.
-        glossary: Texte fiable (slides, notes) dont Whisper reprendra l'orthographe
-            des termes techniques et noms propres ; tronqué à GLOSSARY_MAX_CHARS.
+        glossary: Texte fiable (slides, notes) dont on extrait noms propres et sigles.
     """
     title = title.strip()
     if not title:
         return None
-    prompt = f"Conférence : {title}."
+    parts = [title]
     if speaker.strip():
-        prompt += f" Orateur : {speaker.strip()}."
-    glossary = " ".join(glossary.split())[:GLOSSARY_MAX_CHARS]
-    if glossary:
-        prompt += f" Vocabulaire : {glossary}"
-    return prompt
+        parts.append(speaker.strip())
+    terms = glossary_terms(glossary)
+    if terms:
+        parts.append(", ".join(terms))
+    return ". ".join(parts) + "."
 
 
 def is_hallucination(text: str) -> bool:

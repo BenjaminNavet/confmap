@@ -257,38 +257,33 @@ class IdeaMap {
     });
   }
 
-  // Comparaison en colonnes : un élément comparé par colonne, ses caractéristiques
-  // dessous ; les caractéristiques partagées sont centrées entre leurs éléments, plus bas.
+  // Comparaison de gauche à droite : éléments comparés empilés à gauche, colonne de
+  // caractéristiques à droite (celles du 1er, les partagées, celles du suivant...).
+  // Chaque élément fait face aux siennes : les flèches ne traversent aucune boîte.
   layoutComparison(kids) {
     const edges = kids.connectedEdges();
     const sources = kids.filter((n) => edges.some((e) => e.source().same(n)) && !edges.some((e) => e.target().same(n)));
     if (sources.length < 2) return false;
-    const columnWidth = Math.max(...kids.map((n) => n.data("w"))) + 50;
-    const centers = new Map();
-    sources.forEach((n, i) => { centers.set(n.id(), i * columnWidth); n.position({ x: i * columnWidth, y: 0 }); });
-    const groups = new Map();
-    kids.difference(sources).forEach((n) => {
-      const linked = edges.filter((e) => e.target().same(n) && centers.has(e.source().id())).map((e) => e.source().id());
-      const key = linked.sort((a, b) => centers.get(a) - centers.get(b)).join("|");
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(n);
+    const order = sources.map((n) => n.id());
+    const linkedOf = (n) => edges.filter((e) => e.target().same(n) && order.includes(e.source().id()))
+      .map((e) => e.source().id()).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const ordered = [];
+    for (const id of order) {
+      kids.difference(sources).forEach((n) => { const linked = linkedOf(n); if (linked[0] === id && !ordered.includes(n)) ordered.push(n); });
+    }
+    kids.difference(sources).forEach((n) => { if (!ordered.includes(n)) ordered.push(n); });
+    const columnX = Math.max(...sources.map((n) => n.data("w"))) / 2 + 180 + Math.max(...ordered.map((n) => n.data("w"))) / 2;
+    let y = 0;
+    for (const n of ordered) { n.position({ x: columnX, y: y + n.data("h") / 2 }); y += n.data("h") + 22; }
+    let previousBottom = -Infinity;
+    sources.forEach((n) => {
+      const targets = edges.filter((e) => e.source().same(n)).map((e) => e.target());
+      const center = targets.length ? targets.reduce((sum, t) => sum + t.position("y"), 0) / targets.length : 0;
+      const h = n.data("h");
+      const top = Math.max(center - h / 2, previousBottom + 30);
+      n.position({ x: 0, y: top + h / 2 });
+      previousBottom = top + h;
     });
-    const top = Math.max(...sources.map((n) => n.data("h"))) + 70;
-    let bottom = top;
-    for (const [key, members] of groups) {
-      const linked = key ? key.split("|") : [];
-      if (linked.length !== 1) continue;
-      let y = top;
-      for (const n of members) { n.position({ x: centers.get(linked[0]), y: y + n.data("h") / 2 }); y += n.data("h") + 24; }
-      bottom = Math.max(bottom, y);
-    }
-    let y = bottom + 40;
-    for (const [key, members] of groups) {
-      const linked = key ? key.split("|") : [];
-      if (linked.length === 1) continue;
-      const x = linked.length ? linked.reduce((sum, id) => sum + centers.get(id), 0) / linked.length : ((sources.length - 1) * columnWidth) / 2;
-      for (const n of members) { n.position({ x, y: y + n.data("h") / 2 }); y += n.data("h") + 24; }
-    }
     return true;
   }
 
