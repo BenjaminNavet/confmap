@@ -11,6 +11,7 @@ Boucle ≤ 5 itérations : capture (rejeu 90 s headless) → juge (agent neuf, c
 | Itération | Score | Corrections |
 |---|---|---|
 | 1 | 46/90 (bloquant : stabilité carte) | carte stable + collisions, texte 17 px, paragraphe courant, canvas hiérarchique fromSide/toSide, transcription en callout, résumé horodaté et étiqueté, prompt Whisper |
+| 2 | 52/84 (62 %) | placement par place libre la plus proche, cadrage du sujet courant (zoom ≥ 0,95), nœud neuf signalé 8 s, ≤ 8 nœuds/sujet, comparaison mieux détectée ; ADR 0002 |
 
 ## Prochaine étape
-Itération 2 : capture puis juge.
+Itération 3 : capture puis juge.
