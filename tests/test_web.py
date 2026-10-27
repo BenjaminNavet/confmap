@@ -157,3 +157,11 @@ def test_port_in_use_detects_listening_socket():
 def test_frontend_is_never_served_stale(client):
     response = client.get("/static/app.js")
     assert response.headers["cache-control"] == "no-cache"
+
+
+def test_new_session_allowed_right_after_stop(client, services):
+    first = client.post("/api/sessions").json()["id"]
+    assert client.post(f"/api/sessions/{first}/stop").json()["ok"]
+    response = client.post("/api/sessions")
+    assert response.status_code == 200, response.text
+    assert response.json()["id"] != first

@@ -10,6 +10,7 @@ const ui = {
   items: new Map(), // id -> {ts, kind, segment | className+html}
   renderPending: false,
   hoverId: null,
+  lastSessionId: null,
   segments: new Map(),
   translations: new Map(),
   cost: 0,
@@ -55,7 +56,9 @@ function goHome() {
   const socket = ui.socket;
   ui.socket = null;
   if (socket) socket.close();
+  if (ui.sessionId) ui.lastSessionId = ui.sessionId;
   ui.sessionId = null;
+  resetView();
   history.replaceState(null, "", "/");
   document.title = "confmap";
   document.querySelectorAll(".overlay").forEach((el) => el.classList.add("hidden"));
@@ -102,7 +105,13 @@ function openSession(id) {
 
 // ---------- WebSocket ----------
 
+function resetClock() {
+  ui.clock = { ts: 0, wall: Date.now() / 1000, recording: false };
+  updateRecBadge();
+}
+
 function resetView() {
+  resetClock();
   ui.items.clear();
   ui.segments.clear();
   ui.translations.clear();
@@ -119,6 +128,7 @@ function connect() {
   const socket = new WebSocket(`ws://${location.host}/ws/${ui.sessionId}`);
   ui.socket = socket;
   socket.onmessage = (message) => {
+    if (socket !== ui.socket) return; // ancienne session
     const data = JSON.parse(message.data);
     if (data.type === "snapshot") {
       resetView();
@@ -150,7 +160,10 @@ function connect() {
 async function refreshSessionInfo() {
   try {
     const info = await api(`/api/sessions/${ui.sessionId}`);
+    if (info.id !== ui.sessionId) return; // réponse tardive d'une autre session
     ui.clock.recording = info.recording;
+    ui.clock.ts = Math.max(ui.clock.ts, info.elapsed || 0);
+    ui.clock.wall = Date.now() / 1000;
     if (!info.recording && !info.finalized && !info.finalizing) {
       $("stopBtn").textContent = "▶ Reprendre";
       $("stopBtn").dataset.mode = "resume";
@@ -485,6 +498,18 @@ function init() {
   transcript.addEventListener("mouseover", onTranscriptHover);
   transcript.addEventListener("click", onTranscriptClick);
   $("jumpBtn").onclick = () => { ui.autoScroll = true; scrollToBottom(); };
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const open = [...document.querySelectorAll(".overlay:not(.hidden)")];
+    if (!open.length) return;
+    for (const overlay of open) {
+      if (overlay.id !== "home") overlay.classList.add("hidden");
+    }
+    // L'accueil ne se ferme que s'il y a une session derrière.
+    if (!$("home").classList.contains("hidden") && open.every((o) => o.id === "home") && ui.lastSessionId) {
+      openSession(ui.lastSessionId);
+    }
+  });
   setInterval(updateRecBadge, 1000);
   if (ui.sessionId) openSession(ui.sessionId);
   else showHome();

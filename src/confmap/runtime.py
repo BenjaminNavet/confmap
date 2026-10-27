@@ -161,6 +161,7 @@ class SessionRuntime:
         for event in session.events:
             self.state.apply(event)
         self.recording = False
+        self._stopping = False
         self._source: AudioSource | None = None
         self._recorder: WavRecorder | None = None
         self._time_offset = self._previous_audio_duration()
@@ -224,6 +225,11 @@ class SessionRuntime:
         if self.state.untranslated_segments():
             self._translate_wakeup.set()
 
+    @property
+    def capturing(self) -> bool:
+        """Le micro est pris (faux dès la demande d'arrêt, même si Whisper finit encore)."""
+        return self.recording and not self._stopping
+
     def start_recording(self, source: AudioSource) -> None:
         """Démarre la capture audio dans un nouveau fichier WAV."""
         if self.recording:
@@ -240,10 +246,15 @@ class SessionRuntime:
         self._spawn(self._audio_loop(source, self._recorder, self._time_offset))
         self._status("audio", "recording", filename)
 
+    def release_microphone(self) -> None:
+        """Coupe la capture tout de suite ; la fin de transcription suit dans stop_recording."""
+        if self._source is not None and not self._stopping:
+            self._stopping = True
+            self._source.stop()
+
     async def stop_recording(self) -> None:
         """Arrête la capture et attend la fin des transcriptions en cours."""
-        if self._source is not None:
-            self._source.stop()
+        self.release_microphone()
         await self._audio_done.wait()
         await self._segment_queue.join()
         if self._recorder is not None:
@@ -252,6 +263,7 @@ class SessionRuntime:
             self._recorder = None
         self._source = None
         self.recording = False
+        self._stopping = False
         self._status("audio", "stopped")
 
     async def drain(self, timeout: float = 120.0) -> None:

@@ -78,7 +78,7 @@ class AppServices:
     def recording_session_id(self) -> str | None:
         """Session en cours d'enregistrement, s'il y en a une."""
         return next(
-            (sid for sid, runtime in self.runtimes.items() if runtime.recording), None
+            (sid for sid, runtime in self.runtimes.items() if runtime.capturing), None
         )
 
 
@@ -129,7 +129,8 @@ def session_summary(
         "id": session.id,
         "title": state_title,
         "created_at": session.meta.created_at,
-        "recording": bool(runtime and runtime.recording),
+        "recording": bool(runtime and runtime.capturing),
+        "elapsed": runtime.now() if runtime else 0.0,
         "finalized": session.is_finalized(),
         "finalizing": session.id in services.finalize_tasks
         and not services.finalize_tasks[session.id].done(),
@@ -367,6 +368,7 @@ def create_app(services: AppServices) -> FastAPI:
 
     @app.post("/api/sessions/{session_id}/stop")
     async def stop_session(session_id: str, _: LocalOnly) -> dict:
+        services.runtime(session_id).release_microphone()
         launch_finalization(session_id)
         return {"ok": True}
 
