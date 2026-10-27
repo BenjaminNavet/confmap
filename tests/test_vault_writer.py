@@ -222,13 +222,16 @@ def test_canvas_fallback_layout():
 
 
 def test_canvas_uses_positions():
+    from confmap.vault_writer import POSITION_SCALE_X, POSITION_SCALE_Y
+
     positions = {"a": (500.0, 300.0), "b": (900.5, 700.0), "c": (0.0, 0.0)}
     canvas = render_canvas(make_data(positions=positions))
     assert_canvas_valid(canvas)
     by_id = {node["id"]: node for node in canvas["nodes"]}
     node_a = by_id["a"]
-    assert node_a["x"] + node_a["width"] / 2 == 500
-    assert node_a["y"] + node_a["height"] / 2 == 300
+    # Les positions de l'app sont écartées pour les boîtes plus grandes du canvas.
+    assert node_a["x"] + node_a["width"] / 2 == 500 * POSITION_SCALE_X
+    assert node_a["y"] + node_a["height"] / 2 == 300 * POSITION_SCALE_Y
     assert contains(by_id["g-t1"], by_id["a"]) and contains(by_id["g-t1"], by_id["b"])
 
 
@@ -263,3 +266,14 @@ def test_existing_folder_gets_suffix_and_is_untouched(tmp_path):
     assert second.parent.name == "2026-10-27 Ma Conf (2)"
     assert third.parent.name == "2026-10-27 Ma Conf (3)"
     assert first.read_text(encoding="utf-8") == original_content
+
+
+def test_canvas_boxes_never_overlap_even_with_tight_app_positions():
+    from confmap.vault_writer import NODE_HEIGHT, _topic_node_boxes
+
+    topic = {"id": "t1", "nodes": [{"id": f"n{i}", "label": f"Idée assez longue numéro {i}"} for i in range(6)]}
+    tight = {f"n{i}": (i * 20.0, (i % 2) * 10.0) for i in range(6)}
+    boxes = _topic_node_boxes(topic, 0, tight)
+    for i, (_, _, x1, y1, w1) in enumerate(boxes):
+        for _, _, x2, y2, w2 in boxes[i + 1 :]:
+            assert not (x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + NODE_HEIGHT and y2 < y1 + NODE_HEIGHT)

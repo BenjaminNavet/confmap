@@ -30,6 +30,11 @@ NODE_MIN_WIDTH = 120
 NODE_MAX_WIDTH = 260
 GROUP_PADDING = 40
 GROUP_LABEL_EXTRA = 40
+# Les boîtes du canvas Obsidian sont plus grandes que celles de l'app : on écarte
+# les positions de l'app pour garder la même disposition sans chevauchement.
+POSITION_SCALE_X = 1.7
+POSITION_SCALE_Y = 2.2
+BOX_MARGIN = 30
 
 _FORBIDDEN_TITLE_CHARS = re.compile(r'[/\\:*?"<>|#^\[\]]')
 _MERMAID_ESCAPES = str.maketrans(
@@ -268,13 +273,36 @@ def _topic_node_boxes(
     for row, (node, text, width) in enumerate(zip(nodes, texts, widths, strict=True)):
         if use_positions:
             center_x, center_y = positions[node["id"]]
+            center_x *= POSITION_SCALE_X
+            center_y *= POSITION_SCALE_Y
             x = round(center_x - width / 2)
             y = round(center_y - NODE_HEIGHT / 2)
         else:
             x = column_x + GROUP_PADDING
             y = GROUP_PADDING + GROUP_LABEL_EXTRA + row * FALLBACK_NODE_SPACING
         boxes.append((node, text, x, y, width))
-    return boxes
+    return _resolve_overlaps(boxes)
+
+
+def _resolve_overlaps(
+    boxes: list[tuple[dict, str, int, int, int]],
+) -> list[tuple[dict, str, int, int, int]]:
+    """Décale vers le bas les boîtes qui se chevauchent encore (avec une marge)."""
+    placed: list[list] = []
+    for box in sorted(boxes, key=lambda b: (b[3], b[2])):
+        node, text, x, y, width = box
+        moved = True
+        while moved:
+            moved = False
+            for _, _, other_x, other_y, other_width in placed:
+                overlap_x = x < other_x + other_width + BOX_MARGIN and other_x < x + width + BOX_MARGIN
+                overlap_y = y < other_y + NODE_HEIGHT + BOX_MARGIN and other_y < y + NODE_HEIGHT + BOX_MARGIN
+                if overlap_x and overlap_y:
+                    y = other_y + NODE_HEIGHT + BOX_MARGIN
+                    moved = True
+        placed.append([node, text, x, y, width])
+    order = {id(b[0]): i for i, b in enumerate(boxes)}
+    return [tuple(b) for b in sorted(placed, key=lambda b: order[id(b[0])])]
 
 
 def _unique_id(wanted: str, used_ids: set[str]) -> str:
