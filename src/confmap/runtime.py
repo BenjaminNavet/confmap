@@ -101,7 +101,21 @@ class SessionState:
         recent_notes = [note.text for note in self.notes[-5:]]
         if recent_notes:
             parts.append("notes de l'auditeur : " + " | ".join(recent_notes))
+        slides = self.slide_texts()[-2:]
+        if slides:
+            parts.append(
+                "texte des slides : " + " | ".join(text[:300] for text in slides)
+            )
         return " ; ".join(parts)
+
+    def slide_texts(self) -> list[str]:
+        """Texte des slides analysées, dans l'ordre."""
+        done = [s for s in self.slides.values() if s.status == "done" and s.text_fr]
+        return [s.text_fr for s in sorted(done, key=lambda s: s.ts)]
+
+    def reference_text(self) -> str:
+        """Texte fiable (slides, notes) servant de vocabulaire à Whisper."""
+        return " ".join(self.slide_texts() + [note.text for note in self.notes])
 
     def untranslated_segments(self) -> list[SegmentEvent]:
         """Segments du direct sans traduction, dans l'ordre."""
@@ -329,8 +343,14 @@ class SessionRuntime:
         self.emit(
             ContextEvent(ts=self.now(), title=title.strip(), speaker=speaker.strip())
         )
+        self._refresh_whisper_prompt()
+
+    def _refresh_whisper_prompt(self) -> None:
+        """Amorce Whisper (direct) avec titre, orateur, slides et notes."""
         if isinstance(self.transcriber, MlxWhisperTranscriber):
-            self.transcriber.initial_prompt = build_initial_prompt(title, speaker)
+            self.transcriber.initial_prompt = build_initial_prompt(
+                self.state.title, self.state.speaker, self.state.reference_text()
+            )
 
     def add_note(self, text: str, origin: str = "mac") -> NoteEvent:
         """Ajoute une note et déclenche une mise à jour de la carte."""
@@ -665,4 +685,5 @@ class SessionRuntime:
         )
         photo_path.unlink(missing_ok=True)
         if text:
+            self._refresh_whisper_prompt()
             self.force_map()

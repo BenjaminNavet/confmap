@@ -148,9 +148,13 @@ class IdeaMap {
     });
     if (changed.length) this.layoutTopics(changed);
     const fresh = cy.collection(addedIds.map((id) => cy.getElementById(id)).filter((ele) => ele.nonempty()));
-    if (fresh.nonempty()) {
-      fresh.addClass("fresh");
-      setTimeout(() => fresh.removeClass("fresh"), FRESH_MS);
+    // Un seul signal à la fois : le dernier nœud ajouté.
+    const newest = fresh.nonempty() ? fresh[fresh.length - 1] : null;
+    if (newest) {
+      cy.nodes(".fresh").removeClass("fresh");
+      newest.addClass("fresh");
+      clearTimeout(this.freshTimer);
+      this.freshTimer = setTimeout(() => newest.removeClass("fresh"), FRESH_MS);
     }
     if (this.follow) this.followLatest(fresh);
     return changed.length;
@@ -216,6 +220,7 @@ class IdeaMap {
 
   runTopicLayout(topic, kids) {
     if (topic.kind === "concept") this.layoutConcept(kids);
+    else if (topic.kind === "comparison" && this.layoutComparison(kids)) return;
     else kids.union(kids.connectedEdges()).layout({ ...(KIND_INFO[topic.kind] || KIND_INFO.process).layout, fit: false, animate: false }).run();
   }
 
@@ -250,6 +255,41 @@ class IdeaMap {
         if (found) { node.position(found); return; }
       }
     });
+  }
+
+  // Comparaison en colonnes : un élément comparé par colonne, ses caractéristiques
+  // dessous ; les caractéristiques partagées sont centrées entre leurs éléments, plus bas.
+  layoutComparison(kids) {
+    const edges = kids.connectedEdges();
+    const sources = kids.filter((n) => edges.some((e) => e.source().same(n)) && !edges.some((e) => e.target().same(n)));
+    if (sources.length < 2) return false;
+    const columnWidth = Math.max(...kids.map((n) => n.data("w"))) + 50;
+    const centers = new Map();
+    sources.forEach((n, i) => { centers.set(n.id(), i * columnWidth); n.position({ x: i * columnWidth, y: 0 }); });
+    const groups = new Map();
+    kids.difference(sources).forEach((n) => {
+      const linked = edges.filter((e) => e.target().same(n) && centers.has(e.source().id())).map((e) => e.source().id());
+      const key = linked.sort((a, b) => centers.get(a) - centers.get(b)).join("|");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(n);
+    });
+    const top = Math.max(...sources.map((n) => n.data("h"))) + 70;
+    let bottom = top;
+    for (const [key, members] of groups) {
+      const linked = key ? key.split("|") : [];
+      if (linked.length !== 1) continue;
+      let y = top;
+      for (const n of members) { n.position({ x: centers.get(linked[0]), y: y + n.data("h") / 2 }); y += n.data("h") + 24; }
+      bottom = Math.max(bottom, y);
+    }
+    let y = bottom + 40;
+    for (const [key, members] of groups) {
+      const linked = key ? key.split("|") : [];
+      if (linked.length === 1) continue;
+      const x = linked.length ? linked.reduce((sum, id) => sum + centers.get(id), 0) / linked.length : ((sources.length - 1) * columnWidth) / 2;
+      for (const n of members) { n.position({ x, y: y + n.data("h") / 2 }); y += n.data("h") + 24; }
+    }
+    return true;
   }
 
   layoutConcept(kids) {
@@ -300,7 +340,7 @@ class IdeaMap {
     const box = topic.boundingBox();
     const fitZoom = Math.min((cy.width() - 2 * padding) / box.w, (cy.height() - 2 * padding) / box.h);
     this.programmatic = true;
-    if (fitZoom >= MIN_FOLLOW_ZOOM * 0.85) {
+    if (fitZoom >= 0.6) {
       // Le sujet entier reste visible, quitte à descendre un peu sous le zoom de lecture.
       cy.zoom(Math.min(1.3, fitZoom));
       cy.center(topic);

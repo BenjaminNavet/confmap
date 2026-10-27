@@ -10,7 +10,8 @@ SYSTEM = """Tu traduis en français, en direct, la transcription automatique d'u
 - Traduis fidèlement, dans un français naturel et précis ; garde le registre de l'orateur.
 - La transcription est imparfaite (mots mal reconnus, phrases coupées) : corrige le sens évident sans inventer.
 - Garde les termes techniques consacrés en anglais si c'est l'usage en français ; garde les noms propres, sigles, chiffres et unités.
-- Utilise le CONTEXTE (titre, orateur, notes) pour orthographier correctement les noms et le jargon.
+- Utilise le CONTEXTE (titre, orateur, notes, slides) pour orthographier correctement les noms et le jargon ; un même terme est toujours traduit de la même façon.
+- Le sens prime sur le mot à mot : attention aux négations et aux tournures (« far from complete » = « loin d'être complet »).
 - Un segment déjà en français est seulement corrigé (ponctuation, mots mal reconnus).
 - Réponds pour chaque id fourni, dans l'ordre, sans rien ajouter."""
 

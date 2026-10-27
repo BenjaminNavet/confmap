@@ -366,12 +366,92 @@ def _order_by_barycenter(topic: dict, boxes_by_level: dict[int, list[_Box]]) -> 
             rank[box.node["id"]] = float(index)
 
 
+def _comparison_groups(
+    topic: dict,
+) -> tuple[list[str], dict[tuple[str, ...], list[str]]]:
+    """Éléments comparés (sources des flèches) et caractéristiques groupées par éléments liés."""
+    node_ids = [node["id"] for node in topic.get("nodes", [])]
+    targets = {edge.get("to") for edge in topic.get("edges", [])}
+    sources = [
+        node_id
+        for node_id in node_ids
+        if node_id not in targets
+        and any(edge.get("from") == node_id for edge in topic.get("edges", []))
+    ]
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for node_id in node_ids:
+        if node_id in sources:
+            continue
+        linked = tuple(
+            sorted(
+                (
+                    e.get("from")
+                    for e in topic.get("edges", [])
+                    if e.get("to") == node_id and e.get("from") in sources
+                ),
+                key=sources.index,
+            )
+        )
+        groups.setdefault(linked, []).append(node_id)
+    return sources, groups
+
+
+def _comparison_boxes(topic: dict) -> list[_Box] | None:
+    """Dispose une comparaison en colonnes (None si moins de deux éléments comparés).
+
+    Un élément comparé par colonne, ses caractéristiques dessous ; les caractéristiques
+    partagées sont centrées entre leurs éléments, sous les autres.
+    """
+    sources, groups = _comparison_groups(topic)
+    if len(sources) < 2:
+        return None
+    boxes: dict[str, _Box] = {}
+    for node in topic.get("nodes", []):
+        text = _node_text(node)
+        width = _node_width(text)
+        boxes[node["id"]] = _Box(node, text, 0, 0, width, _node_height(text, width))
+    column_width = max(b.width for b in boxes.values()) + LEVEL_NODE_GAP
+    centers = {source: index * column_width for index, source in enumerate(sources)}
+    for source in sources:
+        box = boxes[source]
+        box.x, box.y = centers[source] - box.width // 2, 0
+    header = max(boxes[s].height for s in sources) + LEVEL_GAP
+    exclusive_bottom = header
+    for linked, members in groups.items():
+        if len(linked) != 1:
+            continue
+        cursor = header
+        for member in members:
+            box = boxes[member]
+            box.x, box.y = centers[linked[0]] - box.width // 2, cursor
+            cursor += box.height + LEVEL_NODE_GAP // 2
+        exclusive_bottom = max(exclusive_bottom, cursor)
+    cursor = exclusive_bottom + LEVEL_GAP // 2
+    for linked, members in groups.items():
+        if len(linked) == 1:
+            continue
+        center = (
+            sum(centers[s] for s in linked) // len(linked)
+            if linked
+            else (len(sources) - 1) * column_width // 2
+        )
+        for member in members:
+            box = boxes[member]
+            box.x, box.y = center - box.width // 2, cursor
+            cursor += box.height + LEVEL_NODE_GAP // 2
+    return _resolve_overlaps(list(boxes.values()))
+
+
 def _topic_node_boxes(topic: dict) -> list[_Box]:
     """Dispose les nœuds d'un sujet en niveaux réguliers, sans chevauchement.
 
     Un niveau par rangée (de haut en bas), ou par colonne (de gauche à droite)
     pour les sujets « timeline » et « process ».
     """
+    if topic.get("kind") == "comparison":
+        comparison = _comparison_boxes(topic)
+        if comparison is not None:
+            return comparison
     nodes = topic.get("nodes", [])
     horizontal = topic.get("kind") in HORIZONTAL_KINDS
     levels = _node_levels(topic)

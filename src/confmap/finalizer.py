@@ -177,7 +177,7 @@ class Finalizer:
                 build_initial_prompt(
                     self.runtime.state.title,
                     self.runtime.state.speaker,
-                    " ".join(item.text for item in self._note_items()),
+                    self.runtime.state.reference_text(),
                 ),
             )
             for piece in pieces:
