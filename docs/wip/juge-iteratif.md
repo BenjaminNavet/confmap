@@ -13,6 +13,7 @@ Boucle ≤ 5 itérations : capture (rejeu 90 s headless) → juge (agent neuf, c
 | 1 | 46/90 (bloquant : stabilité carte) | carte stable + collisions, texte 17 px, paragraphe courant, canvas hiérarchique fromSide/toSide, transcription en callout, résumé horodaté et étiqueté, prompt Whisper |
 | 2 | 52/84 (62 %) | placement par place libre la plus proche, cadrage du sujet courant (zoom ≥ 0,95), nœud neuf signalé 8 s, ≤ 8 nœuds/sujet, comparaison mieux détectée ; ADR 0002 |
 | 3 | 61/90 (68 %) | glossaire Whisper (slides+notes), barycentre dans le canvas, paragraphes 30 s, cadrage du sujet entier (zoom ≥ 0,8) ; banc : slide synthétique |
+| 4 | 66/90 (73 %) | comparaison en colonnes (direct + canvas), halo unique, cadrage sans rognage (zoom ≥ 0,6), slides dans le contexte de traduction et le prompt Whisper du direct |
 
 ## Prochaine étape
-Itération 4 : capture puis juge.
+Itération 5 (dernière) : capture puis juge.
