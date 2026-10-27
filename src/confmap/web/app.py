@@ -222,7 +222,9 @@ def create_app(services: AppServices) -> FastAPI:
     async def no_stale_frontend(request: Request, call_next):
         # Le navigateur revalide toujours l'interface : une mise à jour est vue au rechargement.
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith(("/static", "/capture")):
+        if request.url.path == "/" or request.url.path.startswith(
+            ("/static", "/capture")
+        ):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -282,7 +284,13 @@ def create_app(services: AppServices) -> FastAPI:
         runtime = services.runtime(session_id)
         if runtime.session.is_finalized():
             raise HTTPException(409, "session déjà finalisée")
-        runtime.start_recording(services.audio_source_factory())
+        await runtime.resume(services.audio_source_factory())
+        return session_summary(services, runtime.session, capture_base())
+
+    @app.post("/api/sessions/{session_id}/pause")
+    async def pause_session(session_id: str, _: LocalOnly) -> dict:
+        runtime = services.runtime(session_id)
+        runtime.pause()
         return session_summary(services, runtime.session, capture_base())
 
     @app.post("/api/sessions/{session_id}/context")

@@ -116,6 +116,9 @@ function resetView() {
   ui.segments.clear();
   ui.translations.clear();
   ui.cost = 0;
+  renderCost();
+  setBadge("whisperBadge", "Whisper", "");
+  setBadge("netBadge", "Réseau", "");
   ui.steps = {};
   ui.outputPath = "";
   $("rows").innerHTML = "";
@@ -164,13 +167,13 @@ async function refreshSessionInfo() {
     ui.clock.recording = info.recording;
     ui.clock.ts = Math.max(ui.clock.ts, info.elapsed || 0);
     ui.clock.wall = Date.now() / 1000;
-    if (!info.recording && !info.finalized && !info.finalizing) {
-      $("stopBtn").textContent = "▶ Reprendre";
-      $("stopBtn").dataset.mode = "resume";
-    } else {
-      $("stopBtn").textContent = info.finalized ? "✓ Finalisée" : "■ Fin";
-      $("stopBtn").dataset.mode = info.finalized ? "done" : "stop";
-    }
+    $("stopBtn").textContent = info.finalized ? "✓ Finalisée" : "■ Fin";
+    $("stopBtn").dataset.mode = info.finalized ? "done" : "stop";
+    const pause = $("pauseBtn");
+    pause.disabled = false;
+    pause.classList.toggle("hidden", info.finalized || info.finalizing);
+    pause.textContent = info.recording ? "⏸ Pause" : "▶ Reprendre";
+    pause.dataset.mode = info.recording ? "pause" : "resume";
     if (info.finalizing || (Object.keys(info.finalize_steps).length && !info.finalized)) showFinalModal();
     updateRecBadge();
   } catch (_) { /* hors ligne */ }
@@ -217,7 +220,7 @@ function handleEvent(event, replay) {
     case "llm_usage":
       ui.cost += event.cost_usd || 0;
       if (event.ok && $("netBadge").className.indexOf("bad") === -1) setBadge("netBadge", "Réseau ✓", "ok");
-      $("costBadge").textContent = `${ui.cost.toFixed(3).replace(".", ",")} $`;
+      renderCost();
       break;
     case "finalize_step":
       ui.steps[event.step] = event;
@@ -251,10 +254,14 @@ function setBadge(id, text, level) {
   el.className = `badge ${level || ""}`;
 }
 
+function renderCost() {
+  $("costBadge").textContent = `${ui.cost.toFixed(3).replace(".", ",")} $`;
+}
+
 function updateRecBadge() {
   const now = ui.clock.recording ? ui.clock.ts + (Date.now() / 1000 - ui.clock.wall) : ui.clock.ts;
   if (ui.clock.recording) setBadge("recBadge", `● REC ${fmtTime(now)}`, "rec");
-  else setBadge("recBadge", `■ ${fmtTime(now)}`, "");
+  else setBadge("recBadge", `⏸ ${fmtTime(now)}`, "");
 }
 
 // ---------- transcription ----------
@@ -402,15 +409,24 @@ function renderFinalSteps() {
   }
 }
 
+async function onPause() {
+  const button = $("pauseBtn");
+  const action = button.dataset.mode === "resume" ? "resume" : "pause";
+  button.disabled = true;
+  button.textContent = "…";
+  try {
+    await api(`/api/sessions/${ui.sessionId}/${action}`, { method: "POST" });
+    if (action === "pause") ui.clock.recording = false;
+  } catch (error) {
+    toast(error.message, 5000);
+  }
+  refreshSessionInfo();
+}
+
 async function onStop() {
   const button = $("stopBtn");
   const mode = button.dataset.mode || "stop";
   if (mode === "done") { showFinalModal(); return; }
-  if (mode === "resume") {
-    try { await api(`/api/sessions/${ui.sessionId}/resume`, { method: "POST" }); refreshSessionInfo(); }
-    catch (error) { toast(error.message, 5000); }
-    return;
-  }
   if (!ui.stopArmed) {
     ui.stopArmed = true;
     button.textContent = "Confirmer ?";
@@ -485,6 +501,7 @@ function init() {
     $("qrModal").classList.remove("hidden");
   };
   $("stopBtn").onclick = onStop;
+  $("pauseBtn").onclick = onPause;
   $("retryFinalBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/finalize`, { method: "POST" }).catch((e) => toast(e.message));
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = () => button.closest(".overlay").classList.add("hidden");

@@ -165,3 +165,15 @@ def test_new_session_allowed_right_after_stop(client, services):
     response = client.post("/api/sessions")
     assert response.status_code == 200, response.text
     assert response.json()["id"] != first
+
+
+def test_pause_then_resume(client, services):
+    session_id = client.post("/api/sessions").json()["id"]
+    paused = client.post(f"/api/sessions/{session_id}/pause")
+    assert paused.status_code == 200 and paused.json()["recording"] is False
+
+    resumed = client.post(f"/api/sessions/{session_id}/resume")
+    assert resumed.status_code == 200 and resumed.json()["recording"] is True
+    audio_files = services.store.load(session_id).meta.audio_files
+    assert audio_files == ["enregistrement.wav", "enregistrement-2.wav"]
+    assert services.runtimes[session_id].session.is_finalized() is False

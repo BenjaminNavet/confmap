@@ -162,6 +162,7 @@ class SessionRuntime:
             self.state.apply(event)
         self.recording = False
         self._stopping = False
+        self._pause_task: asyncio.Task | None = None
         self._source: AudioSource | None = None
         self._recorder: WavRecorder | None = None
         self._time_offset = self._previous_audio_duration()
@@ -265,6 +266,20 @@ class SessionRuntime:
         self.recording = False
         self._stopping = False
         self._status("audio", "stopped")
+
+    def pause(self) -> None:
+        """Met l'enregistrement en pause : micro coupé tout de suite, fin de transcription en tâche de fond."""
+        if self.capturing:
+            self.release_microphone()
+            self._pause_task = self._spawn(self.stop_recording())
+
+    async def resume(self, source: AudioSource) -> None:
+        """Reprend après une pause (attend la fin d'une pause encore en cours)."""
+        if self._pause_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._pause_task
+            self._pause_task = None
+        self.start_recording(source)
 
     async def drain(self, timeout: float = 120.0) -> None:
         """Attend que traductions et carte aient rattrapé le contenu (fin de session)."""
