@@ -155,8 +155,9 @@ body {
 }
 .row-item {
   grid-column: 1 / -1; padding: 10px 14px; border-radius: 12px; font-size: 15px; cursor: pointer;
-  border: 1px solid var(--border); animation: rise .35s ease-out;
+  border: 1px solid var(--border);
 }
+.row-item.fresh { animation: rise .35s ease-out; }
 .row-item.note { background: var(--note-bg); border-color: var(--note-border); }
 .row-item.slide { background: var(--slide-bg); border-color: var(--slide-border); white-space: pre-wrap; }
 .row-item.slide.pending { font-style: italic; color: var(--muted); }

@@ -8,6 +8,7 @@ const ui = {
   sessionId: new URLSearchParams(location.search).get("s"),
   socket: null,
   items: new Map(), // id -> {ts, kind, segment | className+html}
+  shownItems: new Set(), // ids d'encadrés déjà affichés (animation d'apparition jouée une seule fois)
   renderPending: false,
   hoverId: null,
   lastSessionId: null,
@@ -131,6 +132,7 @@ function resetView() {
   ui.steps = {};
   ui.outputPath = "";
   $("rows").innerHTML = "";
+  ui.shownItems.clear();
   ui.map.cy.elements().remove();
   ui.map.signatures.clear();
   ui.map.placed.clear();
@@ -339,7 +341,10 @@ function renderTranscript() {
   rows.forEach((row, index) => { if (row.type !== "item") currentIndex = index; });
   const html = rows.map((row, index) => {
     if (row.type === "item") {
-      return `<div class="row-item ${row.entry.className}" data-id="${row.id}">${row.entry.html}</div>`;
+      // L'animation d'apparition ne joue qu'une fois : le rendu complet est refait chaque seconde.
+      const fresh = ui.shownItems.has(row.id) ? "" : " fresh";
+      ui.shownItems.add(row.id);
+      return `<div class="row-item ${row.entry.className}${fresh}" data-id="${row.id}">${row.entry.html}</div>`;
     }
     let original = "", french = "";
     for (const segment of row.segments) {
