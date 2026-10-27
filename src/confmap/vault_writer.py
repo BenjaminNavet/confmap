@@ -183,8 +183,20 @@ def _render_notes(notes: list[NoteItem]) -> str:
         return "\n".join(parts)
     for note in sorted(notes, key=lambda item: item.ts):
         prefix = "📝" if note.kind == "note" else "📷 Slide :"
-        parts.append(f"- **[{format_timestamp(note.ts)}]** {prefix} {note.text}")
+        first, *rest = _flatten_markdown(note.text).splitlines() or [""]
+        parts.append(f"- **[{format_timestamp(note.ts)}]** {prefix} {first}")
+        # Lignes suivantes indentées pour rester dans l'élément de liste.
+        parts += [f"    {line}" for line in rest if line.strip()]
     return "\n".join(parts)
+
+
+def _flatten_markdown(text: str) -> str:
+    """Transforme les titres Markdown en gras (un titre ne peut pas vivre dans une liste)."""
+    lines = []
+    for line in text.strip().splitlines():
+        heading = re.match(r"^\s*#{1,6}\s+(.*)$", line)
+        lines.append(f"**{heading.group(1).strip('* ')}**" if heading else line.rstrip())
+    return "\n".join(lines)
 
 
 def _group_paragraphs(lines: list[TranscriptLine]) -> list[list[TranscriptLine]]:

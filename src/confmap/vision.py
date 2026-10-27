@@ -16,7 +16,7 @@ Extrais en français le contenu informatif de la photo, pour ses notes :
 - pour un schéma ou un graphique : ce qu'il montre (axes, tendances, comparaisons) en 1 à 3 phrases ;
 - garde entre parenthèses le terme d'origine des termes techniques traduits ;
 - ignore le décor, la salle, l'orateur, les logos ; ne décris pas la photo elle-même.
-Sois concis (au plus ~120 mots), en Markdown simple (puces). Si la photo ne contient rien d'informatif, renvoie un texte vide."""
+"title" = titre de la slide (traduit) ; "content" = le reste, sans répéter le titre, sans titres Markdown (#), en puces simples. Sois concis (au plus ~120 mots). Si la photo ne contient rien d'informatif, renvoie un texte vide."""
 
 SCHEMA = {
     "type": "object",

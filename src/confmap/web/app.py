@@ -101,18 +101,6 @@ class PositionsBody(BaseModel):
     positions: dict[str, tuple[float, float]]
 
 
-def local_only(request: Request) -> None:
-    """Dépendance : réserve la route aux clients locaux (le Mac)."""
-    host = request.client.host if request.client else ""
-    if host not in LOCAL_HOSTS:
-        raise HTTPException(403, "réservé au Mac")
-
-
-# Défini au niveau du module : avec `from __future__ import annotations`, FastAPI
-# doit pouvoir résoudre cet alias depuis les globals du module.
-LocalOnly = Annotated[None, Depends(local_only)]
-
-
 def lan_ip() -> str:
     """Adresse IP du Mac sur le réseau local (aucun paquet n'est envoyé)."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -150,10 +138,76 @@ def session_summary(
     }
 
 
+def local_only(request: Request) -> None:
+    """Dépendance : réserve la route aux clients locaux (le Mac)."""
+    host = request.client.host if request.client else ""
+    if host not in LOCAL_HOSTS:
+        raise HTTPException(403, "réservé au Mac")
+
+
+# Défini au niveau du module : avec `from __future__ import annotations`, FastAPI
+# doit pouvoir résoudre cet alias depuis les globals du module.
+LocalOnly = Annotated[None, Depends(local_only)]
+
+ALLOWED_HOSTNAMES = {"localhost", "127.0.0.1", "[::1]", "testserver"}
+
+
+def is_allowed_host(host_header: str, port: int) -> bool:
+    """Vrai si l'en-tête Host (ou Origin sans schéma) vise bien ce serveur.
+
+    Protège contre le DNS rebinding : un nom de domaine étranger qui résoudrait vers le Mac.
+    """
+    if not host_header:
+        return False
+    hostname, _, host_port = (
+        host_header.rpartition(":")
+        if not host_header.endswith("]")
+        else (host_header, "", "")
+    )
+    if not hostname:  # pas de port
+        hostname, host_port = host_header, ""
+    if host_port and host_port != str(port) and hostname != "testserver":
+        return False
+    return hostname in ALLOWED_HOSTNAMES or hostname == lan_ip()
+
+
+class SameOriginMiddleware:
+    """Refuse les requêtes venant d'un autre site (CSRF, WebSocket détourné, DNS rebinding)."""
+
+    def __init__(self, app, port: int) -> None:
+        """Enveloppe l'application ASGI."""
+        self.app = app
+        self.port = port
+
+    async def __call__(self, scope, receive, send) -> None:
+        """Vérifie Host et Origin avant de transmettre la requête."""
+        if scope["type"] in ("http", "websocket"):
+            headers = {
+                key.decode("latin-1"): value.decode("latin-1")
+                for key, value in scope.get("headers", [])
+            }
+            origin = headers.get("origin", "")
+            origin_host = (
+                origin.split("://", 1)[-1] if origin and origin != "null" else ""
+            )
+            allowed = is_allowed_host(headers.get("host", ""), self.port) and (
+                not origin or (origin_host and is_allowed_host(origin_host, self.port))
+            )
+            if not allowed:
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 4403})
+                    return
+                response = Response("origine refusée", status_code=403)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
 def create_app(services: AppServices) -> FastAPI:
     """Construit l'application web."""
     app = FastAPI(title="confmap")
     app.state.services = services
+    app.add_middleware(SameOriginMiddleware, port=services.settings.server.port)
 
     def capture_base() -> str:
         return f"http://{lan_ip()}:{services.settings.server.port}"
