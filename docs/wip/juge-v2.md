@@ -10,6 +10,7 @@ Arrêt anticipé si le score plafonne ou régresse deux fois.
 ## Scores
 | Itération | Score | Corrections |
 |---|---|---|
+| 1 | 46/72 (A 11, B 16, C 11, D 8) | en cours : carte (stabilité, colonnes, comparaison, masquage), UI (rattrapage, décor, contraste, libellés), note (Testez-vous, callouts, ancres) |
 
 ## Prochaine étape
-Itération 1 : capture en cours, puis juge.
+Corrections de l'itération 1 en cours (3 lots parallèles : map.js / app.js+css / vault). Ensuite capture v2-iter-2. Reporté : correction de termes Whisper par l'utilisateur.
