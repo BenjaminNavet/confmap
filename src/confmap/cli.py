@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+import socket
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,6 +38,13 @@ def build_services(config_path: Path | None, audio_file: Path | None, speed: flo
         detector_factory=SileroDetector,
         audio_source_factory=audio_source_factory,
     )
+
+
+def port_in_use(port: int) -> bool:
+    """Indique si un serveur écoute déjà sur ce port en local."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
 def main() -> None:
@@ -76,6 +85,11 @@ def main() -> None:
     services = build_services(args.config, args.audio_file, args.speed)
     if args.port:
         services.settings.server.port = args.port
+    port = services.settings.server.port
+    if port_in_use(port):
+        # Déjà lancé (Spotlight, autre terminal) : inutile de charger Whisper pour échouer ensuite.
+        print(f"confmap tourne déjà : http://localhost:{port}")
+        sys.exit(0)
     if not args.no_warmup:
         logging.getLogger("confmap").info(
             "chargement de Whisper (%s)…", services.settings.models.whisper_live

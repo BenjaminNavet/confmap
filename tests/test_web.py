@@ -139,3 +139,16 @@ async def test_stop_finalizes_into_vault(services):
         assert session.is_finalized()
         assert list(services.settings.paths.vault.rglob("*.md"))
         assert client.get(f"/api/sessions/{session_id}").json()["finalized"] is True
+
+
+def test_port_in_use_detects_listening_socket():
+    import socket
+
+    from confmap.cli import port_in_use
+
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        assert port_in_use(port)
+    assert not port_in_use(port)
