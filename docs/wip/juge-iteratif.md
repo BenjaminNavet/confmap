@@ -10,6 +10,7 @@ Boucle ≤ 5 itérations : capture (rejeu 90 s headless) → juge (agent neuf, c
 ## Scores
 | Itération | Score | Corrections |
 |---|---|---|
+| 1 | 46/90 (bloquant : stabilité carte) | carte stable + collisions, texte 17 px, paragraphe courant, canvas hiérarchique fromSide/toSide, transcription en callout, résumé horodaté et étiqueté, prompt Whisper |
 
 ## Prochaine étape
-Itération 1 : capture en cours.
+Itération 2 : capture puis juge.
