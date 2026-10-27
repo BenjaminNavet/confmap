@@ -481,3 +481,18 @@ def test_canvas_comparison_left_to_right() -> None:
     )
     assert boxes["2018"].y < boxes["2026"].y
     assert boxes["Google"].y < boxes["KG"].y < boxes["Huawei"].y
+
+
+def test_plan_lists_topics_in_order_with_linked_timestamps():
+    topics = make_topics()[::-1]
+    markdown = render_markdown(make_data(topics=topics), "x")
+    plan = markdown.split("**Plan**")[1].split("**Points clés**")[0]
+    assert plan.index("Pipeline") < plan.index("Histoire")
+    assert "1. Pipeline (v2) [beta] ([[#^t-0000|00:00]])" in plan
+    assert "2. Histoire ([[#^t-0000|01:00]])" in plan
+
+
+def test_key_points_sorted_chronologically():
+    summary = Summary(overview="o", key_points=["[05:00] Tard", "[00:10] Tôt", "Sans"])
+    markdown = render_markdown(make_data(summary=summary, transcript=[]), "x")
+    assert markdown.index("Tôt") < markdown.index("Tard") < markdown.index("Sans")

@@ -240,11 +240,33 @@ def _render_recall_questions(
     return parts
 
 
-def _render_summary(summary: Summary, anchors: _TranscriptAnchors) -> str:
+def _first_timestamp(text: str) -> float:
+    match = _TIMESTAMP_PATTERN.search(text)
+    return _parse_timestamp(match.group(1)) if match else math.inf
+
+
+def _render_plan(topics: list[dict], anchors: _TranscriptAnchors) -> list[str]:
+    """Plan : sujets de la carte dans l'ordre d'apparition, avec horodatage lié."""
+    ordered = sorted(topics, key=lambda topic: topic.get("started_at", 0))
+    parts = ["", "**Plan**", ""]
+    for index, topic in enumerate(ordered, start=1):
+        line = f"{index}. {topic.get('title', '')}".rstrip()
+        if "started_at" in topic:
+            line += f" ({anchors.link(topic['started_at'])})"
+        parts.append(line)
+    return parts
+
+
+def _render_summary(
+    summary: Summary, anchors: _TranscriptAnchors, topics: list[dict] | None = None
+) -> str:
     parts = ["## Résumé", "", SUMMARY_DISCLAIMER, "", summary.overview.strip()]
+    if topics:
+        parts += _render_plan(topics, anchors)
     if summary.key_points:
         parts += ["", "**Points clés**", ""]
-        parts += [f"- {anchors.linkify(point)}" for point in summary.key_points]
+        chronological = sorted(summary.key_points, key=_first_timestamp)
+        parts += [f"- {anchors.linkify(point)}" for point in chronological]
     if summary.recall_questions:
         parts += _render_recall_questions(summary.recall_questions, anchors)
     if summary.open_questions:
@@ -387,7 +409,7 @@ def render_markdown(data: FinalNoteData, canvas_filename: str) -> str:
     anchors = _TranscriptAnchors(data.transcript)
     sections = [
         _render_frontmatter(data),
-        _render_summary(data.summary, anchors),
+        _render_summary(data.summary, anchors, data.topics),
         _render_map_section(data, canvas_filename),
         _render_notes(data.notes, anchors),
         _render_transcript(data),

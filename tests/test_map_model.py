@@ -344,3 +344,25 @@ def test_update_json_schema_shape():
     edge_item = graph["properties"]["edges"]["items"]
     assert set(edge_item["required"]) == {"from", "to", "label"}
     assert edge_item["additionalProperties"] is False
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("adopté par", "adopté par"),
+        ("n'exige aucune explication, concept", "n'exige aucune explication"),
+        ("conduit très souvent à une chute", "conduit très souvent"),
+        ("est", ""),
+        ("Est", ""),
+        ("  mène   à ", "mène à"),
+    ],
+)
+def test_edge_labels_are_shortened_to_verb_phrases(raw, expected):
+    topics = []
+    apply_update(
+        topics,
+        make_update(nodes=[("a", "A", ""), ("b", "B", "")], edges=[("a", "b", raw)]),
+        0.0,
+        [],
+    )
+    assert topics[0]["edges"][0]["label"] == expected

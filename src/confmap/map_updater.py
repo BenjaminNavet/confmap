@@ -24,12 +24,13 @@ Types de sujet — choisis celui qui correspond à la façon dont l'orateur expo
 - "process" : comment quelque chose fonctionne ou pourquoi il arrive : étapes, causes et effets. Boîtes = choses ou étapes ; flèches = verbes courts. Ex. : Données brutes → nettoyées par → Pipeline → produit → Graphe.
 - "timeline" : événements dans l'ordre : historique, étapes d'un projet. Boîtes = événements courts commençant par un verbe ; flèche = « puis » ou une date (« en 2019 »). Les dates vont sur les flèches.
 - "concept" : une idée principale et ses parties, types, propriétés ou exemples : définition, méthode, domaine. Une boîte centrale ; toutes les autres s'y rattachent directement ou indirectement. Flèches : comprend, est un type de, utilise, mesure, a pour exemple.
-- "comparison" : deux choses ou plus comparées. Une boîte par élément comparé ; chaque flèche va d'un élément vers une de ses caractéristiques ; une caractéristique commune reçoit une flèche de chacun.
+- "comparison" : deux choses ou plus comparées. Structure attendue : au moins DEUX boîtes « têtes » (les éléments comparés, ex. « 2018 » et « 2026 », « méthode A » et « méthode B »), chacune reliée à ses propres attributs ; chaque flèche va d'une tête vers une de ses caractéristiques ; une caractéristique commune reçoit une flèche de chaque tête. Une comparaison à une seule tête est invalide : crée l'autre tête.
+Structures : comparison = têtes + attributs ; timeline = événements ordonnés reliés par « puis » ; process = étapes enchaînées ; concept = un hub central + satellites.
 Choisis "comparison" dès que l'orateur oppose deux choses, deux versions ou deux moments (avant / maintenant, 2018 / 2026, méthode A / méthode B), même brièvement ; "timeline" dès qu'il raconte des étapes datées.
 
 Règles de rédaction :
 1. Une boîte = 1 à 5 mots, en français, termes précis du domaine (garde le terme anglais consacré si c'est l'usage : « embedding », « transformer »). Pas de phrase.
-2. Une flèche = un verbe court ou une courte locution (utilise, produit, améliore, s'oppose à, mesure), ou « puis » / une date dans une timeline.
+2. Une flèche = un verbe ou groupe verbal de 1 à 3 mots, sans virgule ni phrase (« adopté par », « remplace », « mène à », « utilise », « s'oppose à »), ou « puis » / une date dans une timeline. Jamais « est » seul, jamais de proposition complète : si aucun verbe précis ne convient, laisse "".
 3. Lis chaque flèche comme une phrase : [boîte source] [flèche] [boîte cible]. Elle doit être vraie et dite (ou clairement voulue) par l'orateur.
 4. N'invente jamais de fait. Utilise les noms propres (méthodes, auteurs, jeux de données, chiffres clés) plutôt que des termes vagues.
 5. emoji : un seul, seulement s'il représente clairement un objet concret ; sinon "". La plupart des boîtes n'en ont pas.

@@ -194,6 +194,20 @@ def _clean_label(label: str) -> str:
     return _collapse_whitespace(label)[:MAX_LABEL_CHARS].strip()
 
 
+MAX_EDGE_LABEL_WORDS = 3
+_EMPTY_EDGE_LABELS = {"est", "sont", "a", "ont", "être"}
+
+
+def _clean_edge_label(label: str) -> str:
+    """Ramène une étiquette de flèche à un verbe court (3 mots au plus, sans virgule)."""
+    first_clause = _collapse_whitespace(label).split(",")[0]
+    words = first_clause.split()[:MAX_EDGE_LABEL_WORDS]
+    cleaned = " ".join(words).strip(" .;:")
+    if cleaned.lower() in _EMPTY_EDGE_LABELS:
+        return ""
+    return cleaned
+
+
 def _clean_emoji(emoji: str) -> str:
     stripped = emoji.strip()
     if len(stripped) > MAX_EMOJI_CHARS or any(char.isalnum() for char in stripped):
@@ -290,7 +304,7 @@ def _merge_graph(topic: dict, graph: MapGraph, source_ids: list[str]) -> list[st
             {
                 "from": source_node,
                 "to": target_node,
-                "label": _collapse_whitespace(llm_edge.label),
+                "label": _clean_edge_label(llm_edge.label),
             }
         )
     return added_node_ids
