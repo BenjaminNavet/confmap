@@ -33,7 +33,18 @@ def start_server(log_path: Path) -> subprocess.Popen:
         shutil.rmtree(JUDGE_DIR / name, ignore_errors=True)
     log = log_path.open("w")
     process = subprocess.Popen(
-        ["uv", "run", "confmap", "serve", "--config", str(CONFIG), "--audio-file", str(AUDIO), "--speed", "1"],
+        [
+            "uv",
+            "run",
+            "confmap",
+            "serve",
+            "--config",
+            str(CONFIG),
+            "--audio-file",
+            str(AUDIO),
+            "--speed",
+            "1",
+        ],
         cwd=ROOT,
         stdout=log,
         stderr=subprocess.STDOUT,
@@ -57,9 +68,13 @@ def capture_ui(out: Path) -> None:
     shots.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="dark")
+        page = browser.new_page(
+            viewport={"width": 1440, "height": 900}, color_scheme="dark"
+        )
         console: list[str] = []
-        page.on("console", lambda message: console.append(f"{message.type}: {message.text}"))
+        page.on(
+            "console", lambda message: console.append(f"{message.type}: {message.text}")
+        )
         page.goto(BASE)
         page.wait_for_timeout(1500)
         page.screenshot(path=shots / "00-accueil.png")
@@ -72,10 +87,15 @@ def capture_ui(out: Path) -> None:
         noted = False
         while time.time() - started < REPLAY_SECONDS:
             page.wait_for_timeout(15000)
-            page.screenshot(path=shots / f"{index:02d}-direct-{int(time.time() - started)}s.png")
+            page.screenshot(
+                path=shots / f"{index:02d}-direct-{int(time.time() - started)}s.png"
+            )
             index += 1
             if not noted and time.time() - started > 40:
-                page.fill("#noteInput", "Idée clé : la sémantique n'a jamais été le web lui-même ?")
+                page.fill(
+                    "#noteInput",
+                    "Idée clé : la sémantique n'a jamais été le web lui-même ?",
+                )
                 page.press("#noteInput", "Enter")
                 noted = True
         page.click("#forceBtn")
@@ -90,7 +110,9 @@ def capture_ui(out: Path) -> None:
             first_row.click()
             page.wait_for_timeout(800)
             page.screenshot(path=shots / f"{index + 2:02d}-clic-transcription.png")
-        light = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light")
+        light = browser.new_page(
+            viewport={"width": 1440, "height": 900}, color_scheme="light"
+        )
         light.goto(page.url)
         light.wait_for_timeout(3000)
         light.screenshot(path=shots / f"{index + 3:02d}-theme-clair.png")
@@ -102,8 +124,12 @@ def capture_ui(out: Path) -> None:
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
         if capture_url:
-            phone = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, color_scheme="dark")
-            phone.goto(capture_url.replace("0.0.0.0", "127.0.0.1"))
+            phone = browser.new_page(
+                viewport={"width": 390, "height": 844},
+                is_mobile=True,
+                color_scheme="dark",
+            )
+            phone.goto(re.sub(r"^https?://[^/]+", BASE, capture_url))
             phone.wait_for_timeout(1500)
             phone.screenshot(path=shots / f"{index + 4:02d}-iphone.png", full_page=True)
             phone.close()
@@ -115,16 +141,29 @@ def capture_ui(out: Path) -> None:
         step = 0
         while time.time() < deadline:
             page.wait_for_timeout(20000)
-            text = page.locator("#finalResult").inner_text() if page.locator("#finalResult").count() else ""
+            text = (
+                page.locator("#finalResult").inner_text()
+                if page.locator("#finalResult").count()
+                else ""
+            )
             if step % 3 == 0:
-                page.screenshot(path=shots / f"{index + 6:02d}-finalisation-{step:02d}.png")
+                page.screenshot(
+                    path=shots / f"{index + 6:02d}-finalisation-{step:02d}.png"
+                )
             step += 1
             if text.strip():
                 break
         page.screenshot(path=shots / f"{index + 7:02d}-finalisation-fin.png")
-        page.click("#finalsBtn") if page.locator("#finalsBtn").is_visible() else None
-        page.wait_for_timeout(800)
-        page.screenshot(path=shots / f"{index + 8:02d}-menu-finalisations.png")
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        try:
+            page.click("#finalsBtn", timeout=5000)
+            page.wait_for_timeout(800)
+            page.screenshot(path=shots / f"{index + 8:02d}-menu-finalisations.png")
+        except Exception as error:  # noqa: BLE001 - capture facultative
+            console.append(
+                f"banc: menu Finalisations inaccessible ({error.__class__.__name__})"
+            )
         (out / "console.log").write_text("\n".join(console))
         browser.close()
 
@@ -142,14 +181,28 @@ def render_vault(out: Path) -> None:
             source = out / f"mermaid-{number}.mmd"
             source.write_text(block)
             subprocess.run(
-                ["mmdc", "-i", str(source), "-o", str(out / f"mermaid-{number}.png"), "-t", "dark", "-b", "#1e1e1e", "-w", "1600"],
+                [
+                    "mmdc",
+                    "-i",
+                    str(source),
+                    "-o",
+                    str(out / f"mermaid-{number}.png"),
+                    "-t",
+                    "dark",
+                    "-b",
+                    "#1e1e1e",
+                    "-w",
+                    "1600",
+                ],
                 capture_output=True,
             )
         import markdown
 
         body = markdown.markdown(note.read_text(), extensions=["tables", "fenced_code"])
         (out / "note-rendue.html").write_text(
-            "<html><body style='background:#1e1e1e;color:#ddd;font:15px system-ui;max-width:760px;margin:auto'>" + body + "</body></html>"
+            "<html><body style='background:#1e1e1e;color:#ddd;font:15px system-ui;max-width:760px;margin:auto'>"
+            + body
+            + "</body></html>"
         )
     for canvas in vault_out.rglob("*.canvas"):
         render_canvas(canvas, out / "canvas.png")
@@ -171,9 +224,13 @@ def render_canvas(canvas_path: Path, png_path: Path) -> None:
         left, top = node["x"] - min_x, node["y"] - min_y
         style = f"left:{left}px;top:{top}px;width:{node['width']}px;height:{node['height']}px"
         if node.get("type") == "group":
-            parts.append(f"<div class='group' style='{style}'><span>{node.get('label', '')}</span></div>")
+            parts.append(
+                f"<div class='group' style='{style}'><span>{node.get('label', '')}</span></div>"
+            )
         else:
-            parts.append(f"<div class='card' style='{style}'>{node.get('text', node.get('file', ''))}</div>")
+            parts.append(
+                f"<div class='card' style='{style}'>{node.get('text', node.get('file', ''))}</div>"
+            )
     lines = []
     for edge in data.get("edges", []):
         source, target = by_id.get(edge["fromNode"]), by_id.get(edge["toNode"])
@@ -183,9 +240,13 @@ def render_canvas(canvas_path: Path, png_path: Path) -> None:
         y1 = source["y"] + source["height"] / 2 - min_y
         x2 = target["x"] + target["width"] / 2 - min_x
         y2 = target["y"] + target["height"] / 2 - min_y
-        lines.append(f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' stroke='#888' stroke-width='2' marker-end='url(#a)'/>")
+        lines.append(
+            f"<line x1='{x1}' y1='{y1}' x2='{x2}' y2='{y2}' stroke='#888' stroke-width='2' marker-end='url(#a)'/>"
+        )
         if edge.get("label"):
-            lines.append(f"<text x='{(x1 + x2) / 2}' y='{(y1 + y2) / 2}' fill='#bbb' font-size='13'>{edge['label']}</text>")
+            lines.append(
+                f"<text x='{(x1 + x2) / 2}' y='{(y1 + y2) / 2}' fill='#bbb' font-size='13'>{edge['label']}</text>"
+            )
     html = f"""<html><body style='margin:0;background:#1e1e1e'>
 <style>.card{{position:absolute;box-sizing:border-box;background:#262626;border:2px solid #555;border-radius:8px;
 padding:8px;color:#ddd;font:14px system-ui;overflow:hidden;white-space:pre-wrap}}
@@ -198,7 +259,9 @@ padding:8px;color:#ddd;font:14px system-ui;overflow:hidden;white-space:pre-wrap}
     html_path.write_text(html)
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": min(int(width), 4000), "height": min(int(height), 4000)})
+        page = browser.new_page(
+            viewport={"width": min(int(width), 4000), "height": min(int(height), 4000)}
+        )
         page.goto(html_path.as_uri())
         page.screenshot(path=png_path, full_page=True)
         browser.close()
@@ -208,9 +271,13 @@ def main() -> None:
     """Point d'entrée."""
     out = Path(sys.argv[1]).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    if "--render-only" in sys.argv:
+        render_vault(out)
+        return
     server = start_server(out / "server.log")
     try:
-        capture_ui(out)
+        if "--render-only" not in sys.argv:
+            capture_ui(out)
     finally:
         server.terminate()
         server.wait(timeout=30)
