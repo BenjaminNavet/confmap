@@ -185,7 +185,7 @@ def test_paragraph_split_on_duration():
 
 def test_french_source_has_no_blockquote():
     markdown = render_markdown(make_data(source_lang="fr"), "x")
-    assert "> *" not in markdown
+    assert "> > *" not in markdown
     assert "Bonjour Monde" in markdown
 
 
@@ -224,34 +224,39 @@ def test_canvas_fallback_layout():
     assert group1["type"] == "group" and group1["label"] == "⚙️ Pipeline (v2) [beta]"
     assert contains(group1, by_id["a"]) and contains(group1, by_id["b"])
     assert contains(group2, by_id["c"]) and not contains(group1, by_id["c"])
-    assert by_id["b"]["y"] - by_id["a"]["y"] == 100
-    assert by_id["c"]["x"] > by_id["a"]["x"]
+    # Sujet « process » : niveaux de gauche à droite, nœuds alignés.
+    assert by_id["b"]["x"] > by_id["a"]["x"] + by_id["a"]["width"]
+    assert (
+        by_id["b"]["y"] + by_id["b"]["height"] / 2
+        == by_id["a"]["y"] + by_id["a"]["height"] / 2
+        or by_id["b"]["y"] == by_id["a"]["y"]
+    )
     assert by_id["a"]["text"] == "🅰️ Étape A" and by_id["b"]["text"] == "Étape B"
     assert 120 <= by_id["a"]["width"] <= 260 and by_id["a"]["height"] == 60
     (edge,) = canvas["edges"]
-    assert edge["label"] == "puis" and "fromSide" not in edge
+    assert edge["label"] == "puis"
+    assert (edge["fromSide"], edge["toSide"]) == ("right", "left")
 
 
-def test_canvas_uses_positions():
-    from confmap.vault_writer import POSITION_SCALE_X, POSITION_SCALE_Y
-
-    positions = {"a": (500.0, 300.0), "b": (900.5, 700.0), "c": (0.0, 0.0)}
-    canvas = render_canvas(make_data(positions=positions))
-    assert_canvas_valid(canvas)
-    by_id = {node["id"]: node for node in canvas["nodes"]}
-    node_a = by_id["a"]
-    node_b = by_id["b"]
-    # Les positions de l'app sont écartées pour les boîtes plus grandes du canvas.
-    center = lambda node: (node["x"] + node["width"] / 2, node["y"] + node["height"] / 2)  # noqa: E731
-    assert abs(center(node_b)[0] - center(node_a)[0] - 400.5 * POSITION_SCALE_X) <= 1
-    assert abs(center(node_b)[1] - center(node_a)[1] - 400 * POSITION_SCALE_Y) <= 1
-    assert contains(by_id["g-t1"], by_id["a"]) and contains(by_id["g-t1"], by_id["b"])
-
-
-def test_canvas_partial_positions_fall_back():
-    canvas = render_canvas(make_data(positions={"a": (5000.0, 5000.0)}))
-    by_id = {node["id"]: node for node in canvas["nodes"]}
-    assert by_id["a"]["x"] < 1000
+def test_canvas_vertical_levels_for_concept_topics():
+    topic = {
+        "id": "t1",
+        "title": "T",
+        "kind": "concept",
+        "nodes": [{"id": i, "label": f"Nœud {i}"} for i in "abcd"],
+        "edges": [
+            {"from": "a", "to": "b"},
+            {"from": "a", "to": "c"},
+            {"from": "c", "to": "d"},
+        ],
+    }
+    canvas = render_canvas(make_data(topics=[topic]))
+    by_id = {n["id"]: n for n in canvas["nodes"]}
+    assert by_id["b"]["y"] == by_id["c"]["y"] > by_id["a"]["y"]
+    assert by_id["d"]["y"] > by_id["c"]["y"]
+    assert all(
+        (e["fromSide"], e["toSide"]) == ("bottom", "top") for e in canvas["edges"]
+    )
 
 
 def test_sanitize_title():
@@ -268,7 +273,9 @@ def test_write_conference_files(tmp_path):
     assert markdown_path.name == "AB test.md"
     canvas = json.loads((folder / "AB test.canvas").read_text(encoding="utf-8"))
     assert_canvas_valid(canvas)
-    assert "[[AB test.canvas|carte complète]]" in markdown_path.read_text(encoding="utf-8")
+    assert "[[AB test.canvas|carte complète]]" in markdown_path.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_existing_folder_gets_suffix_and_is_untouched(tmp_path):
@@ -290,15 +297,42 @@ def boxes_overlap(a, b):
     )
 
 
-def test_canvas_boxes_never_overlap_even_with_tight_app_positions():
+def test_canvas_boxes_never_overlap():
     from confmap.vault_writer import _topic_node_boxes
 
-    topic = {"id": "t1", "nodes": [{"id": f"n{i}", "label": f"Idée assez longue numéro {i}"} for i in range(6)]}
-    tight = {f"n{i}": (i * 20.0, (i % 2) * 10.0) for i in range(6)}
-    boxes = [vars(box) for box in _topic_node_boxes(topic, 0, tight)]
+    topic = {
+        "id": "t1",
+        "nodes": [
+            {"id": f"n{i}", "label": f"Idée assez longue numéro {i}"} for i in range(6)
+        ],
+        "edges": [{"from": "n0", "to": f"n{i}"} for i in range(1, 6)],
+    }
+    boxes = [vars(box) for box in _topic_node_boxes(topic)]
     for i, first in enumerate(boxes):
         for second in boxes[i + 1 :]:
             assert not boxes_overlap(first, second)
+
+
+def test_all_edges_have_sides_and_no_text_overlap():
+    canvas = render_canvas(make_data())
+    texts = [n for n in canvas["nodes"] if n["type"] == "text"]
+    for i, first in enumerate(texts):
+        for second in texts[i + 1 :]:
+            assert not boxes_overlap(first, second)
+    assert all("fromSide" in e and "toSide" in e for e in canvas["edges"])
+
+
+def test_transcript_is_collapsible_callout_and_summary_disclaimer():
+    lines = [TranscriptLine(t0=0, t1=2, text_original="hi", text_fr="salut", lang="en")]
+    markdown = render_markdown(make_data(transcript=lines), "x")
+    assert "> [!quote]- Transcription (original | français)" in markdown
+    assert "> **[00:00]** salut" in markdown
+    assert "\n>\n> > *hi*" in markdown
+    assert (
+        "*Généré automatiquement par Claude à partir de la transcription — à vérifier.*"
+        in markdown
+    )
+    assert "tags: [conference]" in markdown
 
 
 def test_long_labels_get_taller_boxes():
@@ -332,12 +366,13 @@ def test_canvas_groups_wrap_into_rows_without_overlap():
         }
         for i in range(20)
     ]
-    # Positions de l'app : tous les sujets sur une seule ligne très large.
-    positions = {f"t{i}n{j}": (i * 700.0 + j * 150, j * 80.0) for i in range(20) for j in range(3)}
-    canvas = render_canvas(make_data(topics=topics, positions=positions))
+    canvas = render_canvas(make_data(topics=topics))
     assert_canvas_valid(canvas)
     groups = [n for n in canvas["nodes"] if n["type"] == "group"]
-    assert max(g["x"] + g["width"] for g in groups) - min(g["x"] for g in groups) <= CANVAS_MAX_ROW_WIDTH
+    assert (
+        max(g["x"] + g["width"] for g in groups) - min(g["x"] for g in groups)
+        <= CANVAS_MAX_ROW_WIDTH
+    )
     assert len({g["y"] for g in groups}) > 1
     for i, first in enumerate(groups):
         for second in groups[i + 1 :]:

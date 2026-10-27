@@ -33,7 +33,12 @@ from confmap.map_model import apply_update, is_full
 from confmap.map_updater import ContentItem, request_update
 from confmap.segmenter import Segmenter, SpeechDetector, SpeechSegment
 from confmap.session_store import SessionLog
-from confmap.transcriber import MlxWhisperTranscriber, Transcriber, is_hallucination
+from confmap.transcriber import (
+    MlxWhisperTranscriber,
+    Transcriber,
+    build_initial_prompt,
+    is_hallucination,
+)
 from confmap.translator import SegmentToTranslate, TranslatedPair, translate_batch
 from confmap.vision import analyze_photo
 
@@ -324,6 +329,8 @@ class SessionRuntime:
         self.emit(
             ContextEvent(ts=self.now(), title=title.strip(), speaker=speaker.strip())
         )
+        if isinstance(self.transcriber, MlxWhisperTranscriber):
+            self.transcriber.initial_prompt = build_initial_prompt(title, speaker)
 
     def add_note(self, text: str, origin: str = "mac") -> NoteEvent:
         """Ajoute une note et déclenche une mise à jour de la carte."""

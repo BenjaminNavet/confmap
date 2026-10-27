@@ -23,12 +23,12 @@ MERMAID_DIRECTIONS = {"process": "LR", "timeline": "LR"}
 DEFAULT_MERMAID_DIRECTION = "TD"
 MAX_TITLE_LENGTH = 80
 FALLBACK_TITLE = "Conférence"
+SUMMARY_DISCLAIMER = (
+    "*Généré automatiquement par Claude à partir de la transcription — à vérifier.*"
+)
 PARAGRAPH_MAX_SECONDS = 45.0
 PARAGRAPH_MAX_GAP_SECONDS = 4.0
 
-FALLBACK_COLUMN_WIDTH = 320
-FALLBACK_COLUMN_GAP = 80
-FALLBACK_NODE_SPACING = 100
 NODE_HEIGHT = 60
 NODE_LINE_HEIGHT = 26
 NODE_VERTICAL_PADDING = 28
@@ -41,10 +41,10 @@ CANVAS_MAX_ROW_WIDTH = 3000
 GROUP_GAP = 120
 GROUP_PADDING = 40
 GROUP_LABEL_EXTRA = 40
-# Les boîtes du canvas Obsidian sont plus grandes que celles de l'app : on écarte
-# les positions de l'app pour garder la même disposition sans chevauchement.
-POSITION_SCALE_X = 1.7
-POSITION_SCALE_Y = 2.2
+# Disposition hiérarchique : écarts entre niveaux et entre nœuds d'un même niveau.
+HORIZONTAL_KINDS = ("timeline", "process")
+LEVEL_GAP = 90
+LEVEL_NODE_GAP = 50
 BOX_MARGIN = 30
 
 _FORBIDDEN_TITLE_CHARS = re.compile(r'[/\\:*?"<>|#^\[\]]')
@@ -165,7 +165,7 @@ def _render_frontmatter(data: FinalNoteData) -> str:
 
 
 def _render_summary(summary: Summary) -> str:
-    parts = ["## Résumé", "", summary.overview.strip()]
+    parts = ["## Résumé", "", SUMMARY_DISCLAIMER, "", summary.overview.strip()]
     if summary.key_points:
         parts += ["", "**Points clés**", ""]
         parts += [f"- {point}" for point in summary.key_points]
@@ -187,7 +187,9 @@ def _render_topic_flowchart(topic: dict) -> list[str]:
     }
     lines = ["```mermaid", f"flowchart {direction}"]
     for node in topic.get("nodes", []):
-        lines.append(f'    {mermaid_ids[node["id"]]}["{_mermaid_text(_node_text(node))}"]')
+        lines.append(
+            f'    {mermaid_ids[node["id"]]}["{_mermaid_text(_node_text(node))}"]'
+        )
     for edge in topic.get("edges", []):
         source = mermaid_ids.get(edge.get("from"))
         target = mermaid_ids.get(edge.get("to"))
@@ -252,14 +254,17 @@ def _group_paragraphs(lines: list[TranscriptLine]) -> list[list[TranscriptLine]]
 
 
 def _render_transcript(data: FinalNoteData) -> str:
-    parts = ["## Transcription"]
+    """Section Transcription dans un callout Obsidian repliable."""
+    body = []
     for paragraph in _group_paragraphs(data.transcript):
         french_text = " ".join(line.text_fr.strip() for line in paragraph)
-        parts += ["", f"**[{format_timestamp(paragraph[0].t0)}]** {french_text}"]
+        body += ["", f"**[{format_timestamp(paragraph[0].t0)}]** {french_text}"]
         if data.source_lang != "fr":
             original_text = " ".join(line.text_original.strip() for line in paragraph)
-            parts += ["", f"> *{original_text}*"]
-    return "\n".join(parts)
+            body += ["", f"> *{original_text}*"]
+    header = "> [!quote]- Transcription (original | français)"
+    quoted = [f"> {line}" if line else ">" for line in body]
+    return "\n".join(["## Transcription", "", header, *quoted])
 
 
 def render_markdown(data: FinalNoteData, canvas_filename: str) -> str:
@@ -305,27 +310,87 @@ class _Box:
     height: int
 
 
-def _topic_node_boxes(
-    topic: dict, topic_index: int, positions: dict[str, tuple[float, float]]
-) -> list[_Box]:
-    """Calcule la boîte de chaque nœud d'un sujet, sans chevauchement."""
+def _node_levels(topic: dict) -> dict[str, int]:
+    """Niveau hiérarchique de chaque nœud (distance BFS depuis les racines).
+
+    Les racines sont les nœuds sans arête entrante ; à défaut (cycle), le nœud
+    de plus haut degré. Les nœuds inaccessibles deviennent de nouvelles racines.
+    """
+    node_ids = [node["id"] for node in topic.get("nodes", [])]
+    known = set(node_ids)
+    successors: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+    incoming = dict.fromkeys(node_ids, 0)
+    degree = dict.fromkeys(node_ids, 0)
+    for edge in topic.get("edges", []):
+        source, target = edge.get("from"), edge.get("to")
+        if source not in known or target not in known:
+            continue
+        successors[source].append(target)
+        incoming[target] += 1
+        degree[source] += 1
+        degree[target] += 1
+
+    levels: dict[str, int] = {}
+    roots = [node_id for node_id in node_ids if incoming[node_id] == 0]
+    while len(levels) < len(node_ids):
+        if not roots:
+            unvisited = [node_id for node_id in node_ids if node_id not in levels]
+            roots = [max(unvisited, key=lambda node_id: degree[node_id])]
+        queue = [root for root in roots if root not in levels]
+        for root in queue:
+            levels[root] = 0
+        roots = []
+        while queue:
+            current = queue.pop(0)
+            for target in successors[current]:
+                if target not in levels:
+                    levels[target] = levels[current] + 1
+                    queue.append(target)
+    return levels
+
+
+def _topic_node_boxes(topic: dict) -> list[_Box]:
+    """Dispose les nœuds d'un sujet en niveaux réguliers, sans chevauchement.
+
+    Un niveau par rangée (de haut en bas), ou par colonne (de gauche à droite)
+    pour les sujets « timeline » et « process ».
+    """
     nodes = topic.get("nodes", [])
-    use_positions = bool(nodes) and all(node["id"] in positions for node in nodes)
-    column_x = topic_index * (FALLBACK_COLUMN_WIDTH + FALLBACK_COLUMN_GAP)
-    boxes = []
-    for row, node in enumerate(nodes):
+    horizontal = topic.get("kind") in HORIZONTAL_KINDS
+    levels = _node_levels(topic)
+    boxes_by_level: dict[int, list[_Box]] = {}
+    for node in nodes:
         text = _node_text(node)
         width = _node_width(text)
-        height = _node_height(text, width)
-        if use_positions:
-            center_x, center_y = positions[node["id"]]
-            x = round(center_x * POSITION_SCALE_X - width / 2)
-            y = round(center_y * POSITION_SCALE_Y - height / 2)
-        else:
-            x = column_x + GROUP_PADDING
-            y = GROUP_PADDING + GROUP_LABEL_EXTRA + row * FALLBACK_NODE_SPACING
-        boxes.append(_Box(node, text, x, y, width, height))
-    return _resolve_overlaps(boxes)
+        box = _Box(node, text, 0, 0, width, _node_height(text, width))
+        boxes_by_level.setdefault(levels[node["id"]], []).append(box)
+
+    def extent(box: _Box) -> int:
+        return box.height if horizontal else box.width
+
+    def thickness(box: _Box) -> int:
+        return box.width if horizontal else box.height
+
+    level_sizes = {
+        level: sum(extent(b) for b in level_boxes)
+        + LEVEL_NODE_GAP * (len(level_boxes) - 1)
+        for level, level_boxes in boxes_by_level.items()
+    }
+    widest = max(level_sizes.values(), default=0)
+    cursor = 0
+    for level in sorted(boxes_by_level):
+        level_boxes = boxes_by_level[level]
+        offset = (widest - level_sizes[level]) // 2
+        for box in level_boxes:
+            if horizontal:
+                box.x, box.y = cursor, offset
+            else:
+                box.x, box.y = offset, cursor
+            offset += extent(box) + LEVEL_NODE_GAP
+        cursor += max(thickness(b) for b in level_boxes) + LEVEL_GAP
+    return _resolve_overlaps(
+        [box for level in sorted(boxes_by_level) for box in boxes_by_level[level]]
+    )
 
 
 def _resolve_overlaps(boxes: list[_Box]) -> list[_Box]:
@@ -336,8 +401,14 @@ def _resolve_overlaps(boxes: list[_Box]) -> list[_Box]:
         while moved:
             moved = False
             for other in placed:
-                overlap_x = box.x < other.x + other.width + BOX_MARGIN and other.x < box.x + box.width + BOX_MARGIN
-                overlap_y = box.y < other.y + other.height + BOX_MARGIN and other.y < box.y + box.height + BOX_MARGIN
+                overlap_x = (
+                    box.x < other.x + other.width + BOX_MARGIN
+                    and other.x < box.x + box.width + BOX_MARGIN
+                )
+                overlap_y = (
+                    box.y < other.y + other.height + BOX_MARGIN
+                    and other.y < box.y + box.height + BOX_MARGIN
+                )
                 if overlap_x and overlap_y:
                     box.y = other.y + other.height + BOX_MARGIN
                     moved = True
@@ -392,15 +463,16 @@ def render_canvas(data: FinalNoteData) -> dict[str, Any]:
     edges: list[dict[str, Any]] = []
     used_ids: set[str] = set()
 
-    topic_boxes = [
-        _topic_node_boxes(topic, topic_index, data.positions)
-        for topic_index, topic in enumerate(data.topics)
-    ]
+    topic_boxes = [_topic_node_boxes(topic) for topic in data.topics]
     _pack_groups(topic_boxes)
-    for topic_index, (topic, boxes) in enumerate(zip(data.topics, topic_boxes, strict=True)):
+    for topic_index, (topic, boxes) in enumerate(
+        zip(data.topics, topic_boxes, strict=True)
+    ):
         if not boxes:
             continue
         canvas_ids: dict[str, str] = {}
+        horizontal = topic.get("kind") in HORIZONTAL_KINDS
+        from_side, to_side = ("right", "left") if horizontal else ("bottom", "top")
         for box in boxes:
             canvas_id = _unique_id(str(box.node["id"]), used_ids)
             canvas_ids[box.node["id"]] = canvas_id
@@ -436,6 +508,8 @@ def render_canvas(data: FinalNoteData) -> dict[str, Any]:
             canvas_edge: dict[str, Any] = {
                 "id": _unique_id(f"e-{source}-{target}-{edge_index}", used_ids),
                 "fromNode": source,
+                "fromSide": from_side,
+                "toSide": to_side,
                 "toNode": target,
             }
             if edge.get("label"):

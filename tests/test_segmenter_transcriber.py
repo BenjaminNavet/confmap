@@ -115,3 +115,13 @@ def test_rechunker_passthrough_16k():
         512,
         512,
     ]
+
+
+def test_build_initial_prompt():
+    from confmap.transcriber import build_initial_prompt
+
+    assert build_initial_prompt("", "Ada") is None
+    assert (
+        build_initial_prompt("Graphes", "Ada") == "Conférence : Graphes. Orateur : Ada."
+    )
+    assert build_initial_prompt("Graphes", "") == "Conférence : Graphes."

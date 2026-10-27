@@ -57,6 +57,17 @@ class Transcriber(Protocol):
         ...
 
 
+def build_initial_prompt(title: str, speaker: str) -> str | None:
+    """Amorce Whisper avec le contexte de la conférence (None si le titre est vide)."""
+    title = title.strip()
+    if not title:
+        return None
+    prompt = f"Conférence : {title}."
+    if speaker.strip():
+        prompt += f" Orateur : {speaker.strip()}."
+    return prompt
+
+
 def is_hallucination(text: str) -> bool:
     """Vrai pour un texte vide, une hallucination connue ou une boucle de répétitions."""
     lowered = text.strip().lower()
@@ -83,6 +94,7 @@ class MlxWhisperTranscriber:
         self.active_model = model
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisper")
         self._languages: Counter[str] = Counter()
+        self.initial_prompt: str | None = None
 
     def use_fallback(self) -> bool:
         """Passe au modèle léger ; retourne False si c'est déjà le cas."""
@@ -109,7 +121,12 @@ class MlxWhisperTranscriber:
         language = language or self.dominant_language
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
-            self._executor, self._run, samples, language, self.active_model
+            self._executor,
+            self._run,
+            samples,
+            language,
+            self.active_model,
+            self.initial_prompt,
         )
         detected = str(result.get("language") or language or "und")
         text = str(result.get("text") or "").strip()
@@ -118,7 +135,11 @@ class MlxWhisperTranscriber:
         return Transcription(lang=detected, text=text)
 
     async def transcribe_file(
-        self, path: Path, model: str, language: str | None
+        self,
+        path: Path,
+        model: str,
+        language: str | None,
+        initial_prompt: str | None = None,
     ) -> tuple[str, list[TimedText]]:
         """Transcription complète d'un fichier (finalisation)."""
         loop = asyncio.get_running_loop()
@@ -130,6 +151,7 @@ class MlxWhisperTranscriber:
                 str(path),
                 path_or_hf_repo=model,
                 language=language,
+                initial_prompt=initial_prompt,
                 condition_on_previous_text=False,
                 verbose=None,
             )
@@ -143,13 +165,19 @@ class MlxWhisperTranscriber:
         return str(result.get("language") or language or "und"), pieces
 
     @staticmethod
-    def _run(samples: np.ndarray, language: str | None, model: str) -> dict:
+    def _run(
+        samples: np.ndarray,
+        language: str | None,
+        model: str,
+        initial_prompt: str | None = None,
+    ) -> dict:
         import mlx_whisper
 
         return mlx_whisper.transcribe(
             samples.astype(np.float32),
             path_or_hf_repo=model,
             language=language,
+            initial_prompt=initial_prompt,
             condition_on_previous_text=False,
             verbose=None,
             temperature=0.0,

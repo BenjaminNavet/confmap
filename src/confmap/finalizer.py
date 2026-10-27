@@ -16,13 +16,14 @@ import soundfile
 from confmap.events import FinalizeStepEvent, SegmentEvent, TranslationEvent
 from confmap.llm import LlmError
 from confmap.runtime import SessionRuntime
-from confmap.transcriber import MlxWhisperTranscriber
+from confmap.transcriber import MlxWhisperTranscriber, build_initial_prompt
 from confmap.translator import SegmentToTranslate, translate_batch
 from confmap.vault_writer import (
     FinalNoteData,
     NoteItem,
     Summary,
     TranscriptLine,
+    format_timestamp,
     write_conference,
 )
 
@@ -35,10 +36,12 @@ RETRANSLATE_TIMEOUT = 180
 SUMMARY_SYSTEM = """Tu rédiges, en français, le compte rendu d'une conférence pour les notes d'un chercheur.
 Tu reçois la transcription traduite, ses notes, le texte des slides photographiées et la carte des idées.
 - overview : 3 à 5 phrases, le propos central et la contribution, sans formule creuse.
-- key_points : 3 à 6 points clés, précis (méthodes, résultats chiffrés, noms).
+- key_points : 3 à 6 points clés, précis (méthodes, résultats chiffrés, noms). Chaque point commence par l'horodatage [mm:ss] du passage concerné (repris de la transcription), par exemple « [12:30] Les auteurs montrent que… ».
 - open_questions : questions ouvertes, limites ou pistes évoquées (0 à 4).
 - suggested_title : titre court de la conférence (utile si l'auditeur n'en a pas saisi).
-N'invente rien qui ne figure pas dans le matériau."""
+N'invente rien qui ne figure pas dans le matériau.
+Parle de la conférence et de son propos, jamais du document : aucun méta-commentaire sur « l'extrait », « le texte » ou « la transcription ».
+Français correct, style impersonnel ; le tutoiement est interdit."""
 
 SUMMARY_SCHEMA = {
     "type": "object",
@@ -168,7 +171,12 @@ class Finalizer:
             if not path.exists():
                 continue
             detected, pieces = await transcriber.transcribe_file(
-                path, self.settings.models.whisper_final, language
+                path,
+                self.settings.models.whisper_final,
+                language,
+                build_initial_prompt(
+                    self.runtime.state.title, self.runtime.state.speaker
+                ),
             )
             for piece in pieces:
                 self.runtime.emit(
@@ -277,7 +285,9 @@ class Finalizer:
     async def _summary(self) -> dict:
         lines, _ = self._transcript_lines()
         state = self.runtime.state
-        transcript = " ".join(line.text_fr for line in lines)
+        transcript = "\n".join(
+            f"[{format_timestamp(line.t0)}] {line.text_fr}" for line in lines
+        )
         notes = "\n".join(f"- [{item.kind}] {item.text}" for item in self._note_items())
         topics = "\n".join(
             f"- {t['title']} ({t['kind']}) : "
