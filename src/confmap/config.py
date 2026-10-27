@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
@@ -34,6 +34,9 @@ class MapConfig(BaseModel):
 
 class PathsConfig(BaseModel):
     """Emplacements sur disque."""
+
+    # Sans cela, Pydantic ne passe pas les valeurs par défaut au validateur : « ~ » resterait littéral.
+    model_config = ConfigDict(validate_default=True)
 
     vault: Path = Path("~/Documents/Obsidian Vault/Conferences")
     sessions: Path = PROJECT_ROOT / "sessions"

@@ -102,3 +102,11 @@ def test_is_finalized(tmp_path):
     session.append(FinalizeStepEvent(step="write", state="done"))
     assert session.is_finalized()
     assert SessionStore(tmp_path).load(session.id).is_finalized()
+
+
+def test_default_vault_path_is_expanded():
+    from confmap.config import Settings
+
+    settings = Settings()
+    assert "~" not in str(settings.paths.vault)
+    assert settings.paths.vault.is_absolute()
