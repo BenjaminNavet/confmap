@@ -21,6 +21,7 @@ from confmap.translator import SegmentToTranslate, translate_batch
 from confmap.vault_writer import (
     FinalNoteData,
     NoteItem,
+    RecallQuestion,
     Summary,
     TranscriptLine,
     format_timestamp,
@@ -38,6 +39,7 @@ Tu reçois la transcription traduite, ses notes, le texte des slides photographi
 - overview : 3 à 5 phrases, le propos central et la contribution, sans formule creuse.
 - key_points : 3 à 6 points clés, précis (méthodes, résultats chiffrés, noms). Chaque point commence par l'horodatage [mm:ss] du passage concerné (repris de la transcription), par exemple « [12:30] Les auteurs montrent que… ».
 - open_questions : questions ouvertes, limites ou pistes évoquées (0 à 4).
+- recall_questions : 3 à 5 questions de rappel factuelles sur l'exposé (pour que l'auditeur se teste de mémoire), chacune avec sa réponse courte (une phrase) et timestamp : l'horodatage « mm:ss » du passage où la réponse est donnée (repris de la transcription).
 - suggested_title : titre court de la conférence (utile si l'auditeur n'en a pas saisi).
 N'invente rien qui ne figure pas dans le matériau.
 Parle de la conférence et de son propos, jamais du document : aucun méta-commentaire sur « l'extrait », « le texte » ou « la transcription ».
@@ -49,9 +51,28 @@ SUMMARY_SCHEMA = {
         "overview": {"type": "string"},
         "key_points": {"type": "array", "items": {"type": "string"}},
         "open_questions": {"type": "array", "items": {"type": "string"}},
+        "recall_questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "answer": {"type": "string"},
+                    "timestamp": {"type": "string"},
+                },
+                "required": ["question", "answer", "timestamp"],
+                "additionalProperties": False,
+            },
+        },
         "suggested_title": {"type": "string"},
     },
-    "required": ["overview", "key_points", "open_questions", "suggested_title"],
+    "required": [
+        "overview",
+        "key_points",
+        "open_questions",
+        "recall_questions",
+        "suggested_title",
+    ],
     "additionalProperties": False,
 }
 
@@ -274,11 +295,20 @@ class Finalizer:
         ]
         return lines, source_lang
 
+    def _photo_path(self, photo_id: str) -> str:
+        path = (self.session.directory / "photos" / f"{photo_id}.img").resolve()
+        return str(path) if path.exists() else ""
+
     def _note_items(self) -> list[NoteItem]:
         state = self.runtime.state
         items = [NoteItem(ts=n.ts, kind="note", text=n.text) for n in state.notes]
         items += [
-            NoteItem(ts=s.ts, kind="slide", text=s.text_fr)
+            NoteItem(
+                ts=s.ts,
+                kind="slide",
+                text=s.text_fr,
+                image_path=self._photo_path(s.photo_id),
+            )
             for s in state.slides.values()
             if s.status == "done" and s.text_fr
         ]
@@ -307,6 +337,7 @@ class Finalizer:
                 "overview": "Aucun contenu enregistré.",
                 "key_points": [],
                 "open_questions": [],
+                "recall_questions": [],
                 "suggested_title": "",
             }
         model = self.settings.models.summary
@@ -328,7 +359,8 @@ class Finalizer:
         title = state.title or summary_data.get("suggested_title") or "Conférence"
         created = datetime.datetime.fromtimestamp(self.session.meta.created_at)
         audio = [
-            str(self.session.directory / name) for name in self.session.meta.audio_files
+            str((self.session.directory / name).resolve())
+            for name in self.session.meta.audio_files
         ]
         data = FinalNoteData(
             title=title,
@@ -341,6 +373,11 @@ class Finalizer:
                 overview=summary_data.get("overview", ""),
                 key_points=list(summary_data.get("key_points", [])),
                 open_questions=list(summary_data.get("open_questions", [])),
+                recall_questions=[
+                    RecallQuestion(**item)
+                    for item in summary_data.get("recall_questions", [])
+                    if isinstance(item, dict) and item.get("question")
+                ],
             ),
             topics=state.topics,
             positions={k: tuple(v) for k, v in state.positions.items()},

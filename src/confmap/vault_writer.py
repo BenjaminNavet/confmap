@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import datetime
 import json
+import logging
 import math
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
 
 TOPIC_ICONS = {
     "process": "⚙️",
@@ -70,6 +74,16 @@ class NoteItem(BaseModel):
     ts: float
     kind: Literal["note", "slide"]
     text: str
+    image_path: str = ""
+    """Photo d'origine d'une slide (copiée dans le dossier de la note à l'écriture)."""
+
+
+class RecallQuestion(BaseModel):
+    """Question de rappel factuelle, avec sa réponse courte et le passage concerné."""
+
+    question: str
+    answer: str
+    timestamp: str = ""
 
 
 class Summary(BaseModel):
@@ -78,6 +92,7 @@ class Summary(BaseModel):
     overview: str
     key_points: list[str]
     open_questions: list[str] = []
+    recall_questions: list[RecallQuestion] = []
 
 
 class FinalNoteData(BaseModel):
@@ -164,11 +179,74 @@ def _render_frontmatter(data: FinalNoteData) -> str:
     return "\n".join(lines)
 
 
-def _render_summary(summary: Summary) -> str:
+_TIMESTAMP_PATTERN = re.compile(r"\[(\d{1,2}:\d{2}(?::\d{2})?)\]")
+
+
+def _parse_timestamp(text: str) -> float:
+    """Convertit ``mm:ss`` ou ``hh:mm:ss`` en secondes."""
+    seconds = 0
+    for part in text.split(":"):
+        seconds = seconds * 60 + int(part)
+    return float(seconds)
+
+
+def _block_id(seconds: float) -> str:
+    """Identifiant de bloc Obsidian d'un paragraphe de transcription (``t-0130``)."""
+    return "t-" + format_timestamp(seconds).replace(":", "")
+
+
+class _TranscriptAnchors:
+    """Liens vers les paragraphes de transcription, par horodatage."""
+
+    def __init__(self, transcript: list[TranscriptLine]) -> None:
+        self.starts = [
+            int(paragraph[0].t0) for paragraph in _group_paragraphs(transcript)
+        ]
+
+    def link(self, seconds: float) -> str:
+        """Lien ``[[#^t-mmss|mm:ss]]`` vers le paragraphe le plus proche avant l'instant.
+
+        Sans transcription, retourne l'horodatage en clair.
+        """
+        label = format_timestamp(seconds)
+        candidates = [start for start in self.starts if start <= int(seconds)]
+        if not self.starts:
+            return label
+        target = candidates[-1] if candidates else self.starts[0]
+        return f"[[#^{_block_id(target)}|{label}]]"
+
+    def linkify(self, text: str) -> str:
+        """Remplace chaque ``[mm:ss]`` du texte par un lien vers la transcription."""
+        if not self.starts:
+            return text
+        return _TIMESTAMP_PATTERN.sub(
+            lambda match: f"[{self.link(_parse_timestamp(match.group(1)))}]", text
+        )
+
+
+def _render_recall_questions(
+    questions: list[RecallQuestion], anchors: _TranscriptAnchors
+) -> list[str]:
+    parts = ["", "### Testez-vous", ""]
+    for index, item in enumerate(questions):
+        if index:
+            parts.append("")
+        parts.append(f"> [!question]- {item.question.strip()}")
+        answer = f"> Réponse : {item.answer.strip()}"
+        stamp = item.timestamp.strip("[] ")
+        if _TIMESTAMP_PATTERN.fullmatch(f"[{stamp}]"):
+            answer += f" [{anchors.link(_parse_timestamp(stamp))}]"
+        parts.append(answer)
+    return parts
+
+
+def _render_summary(summary: Summary, anchors: _TranscriptAnchors) -> str:
     parts = ["## Résumé", "", SUMMARY_DISCLAIMER, "", summary.overview.strip()]
     if summary.key_points:
         parts += ["", "**Points clés**", ""]
-        parts += [f"- {point}" for point in summary.key_points]
+        parts += [f"- {anchors.linkify(point)}" for point in summary.key_points]
+    if summary.recall_questions:
+        parts += _render_recall_questions(summary.recall_questions, anchors)
     if summary.open_questions:
         parts += ["", "**Questions ouvertes**", ""]
         parts += [f"- {question}" for question in summary.open_questions]
@@ -211,17 +289,43 @@ def _render_map_section(data: FinalNoteData, canvas_filename: str) -> str:
     return "\n".join(parts)
 
 
-def _render_notes(notes: list[NoteItem]) -> str:
-    parts = ["## Mes notes et slides", ""]
+def _slide_image_filename(note: NoteItem) -> str:
+    """Nom du fichier image d'une slide dans le dossier de la note."""
+    return f"slide-{_block_id(note.ts)[2:]}.{_image_extension(note.image_path)}"
+
+
+def _image_extension(path: str) -> str:
+    """Extension déduite des premiers octets (les photos de session n'en ont pas)."""
+    try:
+        header = Path(path).read_bytes()[:12]
+    except OSError:
+        return "jpg"
+    if header.startswith(b"\x89PNG"):
+        return "png"
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "webp"
+    return "jpg"
+
+
+def _render_notes(notes: list[NoteItem], anchors: _TranscriptAnchors) -> str:
+    parts = ["## Mes notes et slides"]
     if not notes:
-        parts.append("_Aucune_")
-        return "\n".join(parts)
+        return "\n".join([*parts, "", "_Aucune_"])
     for note in sorted(notes, key=lambda item: item.ts):
-        prefix = "📝" if note.kind == "note" else "📷 Slide :"
+        callout = "note" if note.kind == "note" else "example"
+        label = "" if note.kind == "note" else "Slide"
         first, *rest = _flatten_markdown(note.text).splitlines() or [""]
-        parts.append(f"- **[{format_timestamp(note.ts)}]** {prefix} {first}")
-        # Lignes suivantes indentées pour rester dans l'élément de liste.
-        parts += [f"    {line}" for line in rest if line.strip()]
+        title = (
+            f"{anchors.link(note.ts)} {label} {first}"
+            if label
+            else (f"{anchors.link(note.ts)} {first}")
+        )
+        body = []
+        if note.kind == "slide" and note.image_path:
+            body.append(f"![[{_slide_image_filename(note)}]]")
+        body += [line for line in rest if line.strip()]
+        parts += ["", f"> [!{callout}] {title.strip()}"]
+        parts += [f"> {line}" for line in body]
     return "\n".join(parts)
 
 
@@ -254,14 +358,17 @@ def _group_paragraphs(lines: list[TranscriptLine]) -> list[list[TranscriptLine]]
 
 
 def _render_transcript(data: FinalNoteData) -> str:
-    """Section Transcription dans un callout Obsidian repliable."""
+    """Section Transcription repliée : original puis français, un bloc ancré par paragraphe."""
     body = []
     for paragraph in _group_paragraphs(data.transcript):
         french_text = " ".join(line.text_fr.strip() for line in paragraph)
-        body += ["", f"**[{format_timestamp(paragraph[0].t0)}]** {french_text}"]
-        if data.source_lang != "fr":
-            original_text = " ".join(line.text_original.strip() for line in paragraph)
-            body += ["", f"> *{original_text}*"]
+        original_text = " ".join(line.text_original.strip() for line in paragraph)
+        stamp = format_timestamp(paragraph[0].t0)
+        block = _block_id(paragraph[0].t0)
+        if data.source_lang == "fr":
+            body += ["", f"**[{stamp}]** {french_text} ^{block}"]
+        else:
+            body += ["", f"**[{stamp}]** {original_text} ^{block}", "", french_text]
     header = "> [!quote]- Transcription (original | français)"
     quoted = [f"> {line}" if line else ">" for line in body]
     return "\n".join(["## Transcription", "", header, *quoted])
@@ -277,11 +384,12 @@ def render_markdown(data: FinalNoteData, canvas_filename: str) -> str:
     Returns:
         Texte Markdown complet, frontmatter YAML compris.
     """
+    anchors = _TranscriptAnchors(data.transcript)
     sections = [
         _render_frontmatter(data),
-        _render_summary(data.summary),
+        _render_summary(data.summary, anchors),
         _render_map_section(data, canvas_filename),
-        _render_notes(data.notes),
+        _render_notes(data.notes, anchors),
         _render_transcript(data),
     ]
     return "\n\n".join(sections) + "\n"
@@ -645,6 +753,12 @@ def write_conference(data: FinalNoteData, vault_root: Path) -> Path:
         Path(vault_root), f"{data.date.isoformat()} {safe_title}"
     )
     canvas_filename = f"{safe_title}.canvas"
+    for note in data.notes:
+        if note.kind == "slide" and note.image_path:
+            try:
+                shutil.copyfile(note.image_path, folder / _slide_image_filename(note))
+            except OSError:
+                log.warning("photo de slide introuvable : %s", note.image_path)
     markdown_path = folder / f"{safe_title}.md"
     markdown_path.write_text(render_markdown(data, canvas_filename), encoding="utf-8")
     (folder / canvas_filename).write_text(

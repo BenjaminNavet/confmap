@@ -4,6 +4,7 @@ import json
 from confmap.vault_writer import (
     FinalNoteData,
     NoteItem,
+    RecallQuestion,
     Summary,
     TranscriptLine,
     format_timestamp,
@@ -138,9 +139,9 @@ def test_topic_without_nodes_has_heading_but_no_diagram():
 
 def test_notes_sorted_and_formatted():
     markdown = render_markdown(make_data(), "x")
-    assert markdown.index("- **[00:05]** 📝 Première note") < markdown.index(
-        "- **[01:10]** 📷 Slide : Slide titre"
-    )
+    assert markdown.index(
+        "> [!note] [[#^t-0000|00:05]] Première note"
+    ) < markdown.index("> [!example] [[#^t-0000|01:10]] Slide Slide titre")
 
 
 def test_empty_notes_and_topics():
@@ -158,8 +159,9 @@ def test_timestamp_formats():
 
 def test_transcript_paragraph_single_with_original():
     markdown = render_markdown(make_data(), "x")
-    assert "**[00:00]** Bonjour Monde" in markdown
-    assert "> *Hello World*" in markdown
+    assert "**[00:00]** Hello World ^t-0000" in markdown
+    assert markdown.index("Hello World") < markdown.index("Bonjour Monde")
+    assert "*Hello World*" not in markdown
 
 
 def test_paragraph_split_on_gap():
@@ -168,7 +170,7 @@ def test_paragraph_split_on_gap():
         TranscriptLine(t0=8, t1=10, text_original="b", text_fr="B", lang="en"),
     ]
     markdown = render_markdown(make_data(transcript=lines), "x")
-    assert "**[00:00]** A" in markdown and "**[00:08]** B" in markdown
+    assert "**[00:00]** a ^t-0000" in markdown and "**[00:08]** b ^t-0008" in markdown
 
 
 def test_paragraph_split_on_duration():
@@ -179,8 +181,8 @@ def test_paragraph_split_on_duration():
         for i in range(10)
     ]
     markdown = render_markdown(make_data(transcript=lines), "x")
-    assert "**[00:00]** f0 f1 f2 f3 f4" in markdown
-    assert "**[00:50]** f5 f6 f7 f8 f9" in markdown
+    assert "**[00:00]** o0 o1 o2 o3 o4" in markdown
+    assert "**[00:50]** o5 o6 o7 o8 o9" in markdown
 
 
 def test_french_source_has_no_blockquote():
@@ -193,7 +195,65 @@ def test_hour_timestamp_in_transcript():
     lines = [
         TranscriptLine(t0=3700, t1=3705, text_original="o", text_fr="f", lang="en")
     ]
-    assert "**[01:01:40]** f" in render_markdown(make_data(transcript=lines), "x")
+    assert "**[01:01:40]** o ^t-010140" in render_markdown(
+        make_data(transcript=lines), "x"
+    )
+
+
+def test_recall_questions_section_with_collapsed_callouts():
+    summary = Summary(
+        overview="o",
+        key_points=["[00:09] Un fait."],
+        recall_questions=[
+            RecallQuestion(question="Qui ?", answer="Ada", timestamp="01:10"),
+            RecallQuestion(question="Quand ?", answer="Hier", timestamp=""),
+        ],
+        open_questions=["Ouvert ?"],
+    )
+    lines = [
+        TranscriptLine(t0=t, t1=t + 3, text_original="a", text_fr="A", lang="en")
+        for t in (0, 8, 60, 66)
+    ]
+    markdown = render_markdown(make_data(summary=summary, transcript=lines), "x")
+    assert "> [!question]- Qui ?\n> Réponse : Ada [[[#^t-0100|01:10]]]" in markdown
+    assert "> [!question]- Quand ?\n> Réponse : Hier\n" in markdown
+    assert (
+        markdown.index("Points clés")
+        < markdown.index("Testez-vous")
+        < markdown.index("Questions ouvertes")
+    )
+
+
+def test_no_recall_section_without_questions():
+    assert "Testez-vous" not in render_markdown(make_data(), "x")
+
+
+def test_key_point_timestamps_link_to_previous_paragraph():
+    lines = [
+        TranscriptLine(t0=0, t1=3, text_original="a", text_fr="A", lang="en"),
+        TranscriptLine(t0=60, t1=63, text_original="b", text_fr="B", lang="en"),
+    ]
+    summary = Summary(overview="o", key_points=["[01:30] Fait", "[00:10] Autre"])
+    markdown = render_markdown(make_data(summary=summary, transcript=lines), "x")
+    assert "- [[[#^t-0100|01:30]]] Fait" in markdown
+    assert "- [[[#^t-0000|00:10]]] Autre" in markdown
+    assert "^t-0100" in markdown
+
+
+def test_key_points_stay_plain_without_transcript():
+    summary = Summary(overview="o", key_points=["[01:30] Fait"])
+    markdown = render_markdown(make_data(summary=summary, transcript=[]), "x")
+    assert "- [01:30] Fait" in markdown
+
+
+def test_slide_callout_embeds_copied_image(tmp_path):
+    photo = tmp_path / "p.img"
+    photo.write_bytes(b"\x89PNG....")
+    notes = [NoteItem(ts=70, kind="slide", text="Titre\nligne", image_path=str(photo))]
+    note_path = write_conference(make_data(notes=notes), tmp_path / "vault")
+    markdown = note_path.read_text(encoding="utf-8")
+    assert "> [!example]" in markdown and "> ![[slide-0110.png]]\n> ligne" in markdown
+    assert (note_path.parent / "slide-0110.png").exists()
 
 
 def assert_canvas_valid(canvas):
@@ -326,8 +386,7 @@ def test_transcript_is_collapsible_callout_and_summary_disclaimer():
     lines = [TranscriptLine(t0=0, t1=2, text_original="hi", text_fr="salut", lang="en")]
     markdown = render_markdown(make_data(transcript=lines), "x")
     assert "> [!quote]- Transcription (original | français)" in markdown
-    assert "> **[00:00]** salut" in markdown
-    assert "\n>\n> > *hi*" in markdown
+    assert "> **[00:00]** hi ^t-0000\n>\n> salut" in markdown
     assert (
         "*Généré automatiquement par Claude à partir de la transcription — à vérifier.*"
         in markdown
