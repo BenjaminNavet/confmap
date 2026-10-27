@@ -28,7 +28,7 @@ class MapConfig(BaseModel):
 
     interval_seconds: float = 20
     min_gap_seconds: float = 8
-    max_nodes_per_topic: int = 10
+    max_nodes_per_topic: int = 8
     max_topic_seconds: float = 300
 
 

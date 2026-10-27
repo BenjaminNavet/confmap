@@ -10,8 +10,8 @@ const KIND_INFO = {
   concept: { icon: "💡", layout: null },
 };
 const TOPIC_GAP = 140;
-const FRESH_MS = 4000;
-const NODE_MARGIN = 18;
+const FRESH_MS = 8000;
+const NODE_MARGIN = 30;
 // Zoom minimal en suivi du direct : le texte des nœuds reste à ~14 px à l'écran.
 const MIN_FOLLOW_ZOOM = 0.95;
 
@@ -68,7 +68,7 @@ class IdeaMap {
         style: {
           shape: "round-rectangle",
           "background-color": cssVar("--node-bg"),
-          "border-color": kindColor,
+          "border-color": cssVar("--node-border"),
           "border-width": 1.5,
           label: "data(label)",
           "text-wrap": "wrap",
@@ -98,7 +98,7 @@ class IdeaMap {
           "text-max-width": 140,
         },
       },
-      { selector: "node.idea.fresh", style: { "underlay-color": cssVar("--fresh-glow"), "underlay-opacity": 0.55, "underlay-padding": 8 } },
+      { selector: "node.idea.fresh", style: { "border-color": cssVar("--fresh-glow"), "border-width": 3, "underlay-color": cssVar("--fresh-glow"), "underlay-opacity": 0.45, "underlay-padding": 9 } },
       { selector: "node.idea.highlight", style: { "border-width": 4, "border-color": cssVar("--accent"), "underlay-color": cssVar("--accent"), "underlay-opacity": 0.45, "underlay-padding": 10 } },
     ];
   }
@@ -219,23 +219,35 @@ class IdeaMap {
     else kids.union(kids.connectedEdges()).layout({ ...(KIND_INFO[topic.kind] || KIND_INFO.process).layout, fit: false, animate: false }).run();
   }
 
-  // Pousse vers le bas les nœuds `movable` qui chevauchent un autre nœud (marge comprise).
+  // Déplace chaque nœud de `movable` qui chevauche un autre nœud vers la place libre
+  // la plus proche (cercles de rayon croissant autour de sa position proposée).
   resolveCollisions(movable) {
     const others = this.cy.nodes(".idea");
-    const box = (n) => {
-      const p = n.position(), w = n.data("w") / 2 + NODE_MARGIN / 2, h = n.data("h") / 2 + NODE_MARGIN / 2;
+    const boxAt = (n, p) => {
+      const w = n.data("w") / 2 + NODE_MARGIN / 2, h = n.data("h") / 2 + NODE_MARGIN / 2;
       return { x1: p.x - w, x2: p.x + w, y1: p.y - h, y2: p.y + h };
     };
+    const free = (node, p) => {
+      const a = boxAt(node, p);
+      return others.every((o) => {
+        if (o.same(node)) return true;
+        const b = boxAt(o, o.position());
+        return !(a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2);
+      });
+    };
     movable.forEach((node) => {
-      for (let attempt = 0; attempt < 60; attempt++) {
-        const a = box(node);
-        const hit = others.filter((o) => {
-          if (o.same(node)) return false;
-          const b = box(o);
-          return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
-        })[0];
-        if (!hit) break;
-        node.position({ x: node.position("x"), y: box(hit).y2 + node.data("h") / 2 + NODE_MARGIN / 2 + 1 });
+      const origin = { ...node.position() };
+      if (free(node, origin)) return;
+      for (let radius = 40; radius <= 1200; radius += 40) {
+        const steps = Math.max(8, Math.round(radius / 15));
+        let found = null;
+        for (let i = 0; i < steps && !found; i++) {
+          // Commence vers le bas puis tourne : les ajouts restent sous leur parent si possible.
+          const angle = Math.PI / 2 + (2 * Math.PI * i) / steps;
+          const p = { x: origin.x + Math.cos(angle) * radius * 1.6, y: origin.y + Math.sin(angle) * radius };
+          if (free(node, p)) found = p;
+        }
+        if (found) { node.position(found); return; }
       }
     });
   }
@@ -278,18 +290,23 @@ class IdeaMap {
   }
 
   followLatest(fresh) {
-    // Suivi du direct : zoom stable (texte lisible), on ne fait que recentrer
-    // quand les derniers ajouts sortent du cadre.
+    // Suivi du direct : on cadre le sujet courant en entier si le texte reste lisible
+    // (zoom ≥ MIN_FOLLOW_ZOOM) ; sinon on garde ce zoom et on centre sur les derniers ajouts.
     const cy = this.cy;
     const last = this.topics.length ? cy.getElementById(this.topics[this.topics.length - 1].id) : null;
-    const target = fresh && fresh.nonempty() ? fresh : last && last.nonempty() ? last.descendants() : null;
-    if (!target || target.empty()) return;
+    if (!last || last.empty()) return;
+    const topic = last.union(last.descendants());
+    const padding = 30;
+    const box = topic.boundingBox();
+    const fitZoom = Math.min((cy.width() - 2 * padding) / box.w, (cy.height() - 2 * padding) / box.h);
     this.programmatic = true;
-    const zoom = Math.min(1.3, Math.max(MIN_FOLLOW_ZOOM, cy.zoom()));
-    if (zoom !== cy.zoom()) cy.zoom(zoom);
-    const box = target.boundingBox(), view = cy.extent();
-    const inside = box.x1 >= view.x1 && box.x2 <= view.x2 && box.y1 >= view.y1 && box.y2 <= view.y2;
-    if (!inside) cy.center(target);
+    if (fitZoom >= MIN_FOLLOW_ZOOM) {
+      cy.zoom(Math.min(1.3, fitZoom));
+      cy.center(topic);
+    } else {
+      cy.zoom(MIN_FOLLOW_ZOOM);
+      cy.center(fresh && fresh.nonempty() ? fresh : topic);
+    }
     this.programmatic = false;
   }
 

@@ -12,7 +12,7 @@ whisper_final = "mlx-community/whisper-large-v3-mlx"
 [map]
 interval_seconds = 20
 min_gap_seconds = 8
-max_nodes_per_topic = 10
+max_nodes_per_topic = 8
 max_topic_seconds = 300
 
 [paths]

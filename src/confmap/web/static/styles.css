@@ -20,6 +20,7 @@
   --concept: #34d399;
   --comparison: #f472b6;
   --node-bg: #20242a;
+  --node-border: #4a515b;
   --group-bg: #16191d;
 }
 * { box-sizing: border-box; }

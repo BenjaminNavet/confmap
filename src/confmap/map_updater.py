@@ -25,6 +25,7 @@ Types de sujet — choisis celui qui correspond à la façon dont l'orateur expo
 - "timeline" : événements dans l'ordre : historique, étapes d'un projet. Boîtes = événements courts commençant par un verbe ; flèche = « puis » ou une date (« en 2019 »). Les dates vont sur les flèches.
 - "concept" : une idée principale et ses parties, types, propriétés ou exemples : définition, méthode, domaine. Une boîte centrale ; toutes les autres s'y rattachent directement ou indirectement. Flèches : comprend, est un type de, utilise, mesure, a pour exemple.
 - "comparison" : deux choses ou plus comparées. Une boîte par élément comparé ; chaque flèche va d'un élément vers une de ses caractéristiques ; une caractéristique commune reçoit une flèche de chacun.
+Choisis "comparison" dès que l'orateur oppose deux choses, deux versions ou deux moments (avant / maintenant, 2018 / 2026, méthode A / méthode B), même brièvement ; "timeline" dès qu'il raconte des étapes datées.
 
 Règles de rédaction :
 1. Une boîte = 1 à 5 mots, en français, termes précis du domaine (garde le terme anglais consacré si c'est l'usage : « embedding », « transformer »). Pas de phrase.
@@ -38,7 +39,8 @@ Règles de sujet :
 7. Si la carte est vide, si l'orateur passe à autre chose, ou si le SUJET COURANT est PLEIN, ouvre un nouveau sujet : "new_topic_title" (1 à 5 mots, différent des titres précédents), "new_topic_kind", et ses boîtes et flèches dans "new_topic" (flèches internes à "new_topic" seulement).
 8. Renvoie tout vide pour un contenu qui n'apporte rien : salutations, logistique, remerciements, blagues, problèmes techniques.
 9. Ids des nouvelles boîtes : courts ("a", "b", "c"), uniques dans ta réponse.
-10. Au plus 7 nouvelles boîtes par réponse : seulement les idées importantes."""
+10. Au plus 5 nouvelles boîtes par réponse : seulement les idées importantes. Un sujet lisible a 4 à 8 boîtes.
+11. Un nouveau sujet ne reprend pas comme boîte centrale une boîte d'un sujet précédent : s'il ne fait que détailler cette boîte, ajoute plutôt au sujet courant."""
 
 
 @dataclass
