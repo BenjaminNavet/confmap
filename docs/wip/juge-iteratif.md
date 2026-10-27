@@ -14,6 +14,7 @@ Boucle ≤ 5 itérations : capture (rejeu 90 s headless) → juge (agent neuf, c
 | 2 | 52/84 (62 %) | placement par place libre la plus proche, cadrage du sujet courant (zoom ≥ 0,95), nœud neuf signalé 8 s, ≤ 8 nœuds/sujet, comparaison mieux détectée ; ADR 0002 |
 | 3 | 61/90 (68 %) | glossaire Whisper (slides+notes), barycentre dans le canvas, paragraphes 30 s, cadrage du sujet entier (zoom ≥ 0,8) ; banc : slide synthétique |
 | 4 | 66/90 (73 %) | comparaison en colonnes (direct + canvas), halo unique, cadrage sans rognage (zoom ≥ 0,6), slides dans le contexte de traduction et le prompt Whisper du direct |
+| 5 | 58/90 (régression : texte français des slides dans l'amorce Whisper) | amorce limitée aux noms propres/sigles, comparaisons gauche → droite (direct, canvas, Mermaid) |
 
 ## Prochaine étape
-Itération 5 (dernière) : capture puis juge.
+Boucle terminée (5 itérations). Capture de vérification après le correctif de régression ; pistes restantes dans .judge/iter-5/rapport.md (lien slide → nœuds, Mermaid larges, traduction en direct).
