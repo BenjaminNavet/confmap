@@ -1,0 +1,24 @@
+# Copier en config.toml et adapter.
+
+[models]
+translate = "claude-haiku-5-5"
+map = "claude-sonnet-5-5"
+vision = "claude-sonnet-5-5"
+summary = "claude-sonnet-5-5"
+whisper_live = "mlx-community/whisper-large-v3-turbo"
+whisper_fallback = "mlx-community/whisper-small-mlx"
+whisper_final = "mlx-community/whisper-large-v3-mlx"
+
+[map]
+interval_seconds = 20
+min_gap_seconds = 8
+max_nodes_per_topic = 10
+max_topic_seconds = 300
+
+[paths]
+vault = "~/Documents/Obsidian Vault/Conferences"
+# sessions = "~/dev/confmap/sessions"
+
+[server]
+host = "0.0.0.0"
+port = 8010

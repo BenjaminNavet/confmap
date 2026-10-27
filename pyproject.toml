@@ -1,0 +1,52 @@
+[project]
+name = "confmap"
+version = "0.1.0"
+description = "Suivi de conférences : transcription traduite en français, carte des idées en direct, export Obsidian."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "anthropic>=0.69",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "python-ulid>=3.0",
+    "python-dotenv>=1.0",
+    "python-multipart>=0.0.12",
+    "numpy>=2.0",
+    "sounddevice>=0.5",
+    "soundfile>=0.12",
+    "mlx-whisper>=0.4",
+    "qrcode>=8.0",
+    "pillow>=11.0",
+    "onnxruntime>=1.20",
+]
+
+[project.scripts]
+confmap = "confmap.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/confmap"]
+
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "UP", "B", "SIM", "I", "D"]
+ignore = ["E501", "SIM103"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D"]
+
+[tool.ruff]
+exclude = [".venv", "__pycache__", "*.pyc", ".DS_Store", ".vscode", "*.egg-info", "dist", "build"]

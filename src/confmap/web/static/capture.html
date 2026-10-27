@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>confmap · capture</title>
+<style>
+  :root { --bg: #f6f5f2; --panel: #fff; --text: #1f2328; --muted: #6b7280; --border: #e5e2dc; --accent: #2563eb; --ok: #16a34a; --bad: #dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #15171a; --panel: #1d2024; --text: #e6e6e6; --muted: #a0a4ab; --border: #2d3137; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.4 -apple-system, sans-serif; padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .photo { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 140px; border-radius: 16px; background: var(--accent); color: #fff; font-size: 24px; font-weight: 600; border: 0; }
+  .photo input { display: none; }
+  form { margin-top: 14px; display: flex; gap: 8px; }
+  textarea { flex: 1; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); resize: none; }
+  button.send { padding: 0 16px; border-radius: 10px; border: 1px solid var(--accent); background: var(--panel); color: var(--accent); font: inherit; }
+  ul { list-style: none; padding: 0; margin: 18px 0 0; }
+  li { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin-bottom: 8px; font-size: 14px; white-space: pre-wrap; }
+  .state { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .state.ok { color: var(--ok); } .state.bad { color: var(--bad); }
+  .error { color: var(--bad); margin-top: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>confmap · photos et notes</h1>
+<label class="photo">📷 Prendre une photo
+  <input id="photoInput" type="file" accept="image/*" capture="environment">
+</label>
+<form id="noteForm">
+  <textarea id="noteInput" rows="2" placeholder="Note rapide…"></textarea>
+  <button class="send" type="submit">Envoyer</button>
+</form>
+<div id="error" class="error"></div>
+<ul id="list"></ul>
+<script>
+"use strict";
+const params = new URLSearchParams(location.search);
+const sessionId = params.get("s"), token = params.get("t");
+const base = `/api/sessions/${sessionId}`;
+const local = []; // envois en cours, affichés avant confirmation
+
+function esc(t) { return String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]); }
+function showError(text) { document.getElementById("error").textContent = text || ""; }
+
+async function downscale(file) {
+  // Réduit la photo avant l'envoi (réseau de conférence lent).
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.85));
+  } catch (_) {
+    return file;
+  }
+}
+
+document.getElementById("photoInput").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  const entry = { kind: "slide", status: "upload", text: "envoi de la photo…" };
+  local.unshift(entry); render([]);
+  try {
+    const form = new FormData();
+    form.append("file", await downscale(file), "photo.jpg");
+    const response = await fetch(`${base}/photos?t=${encodeURIComponent(token)}`, { method: "POST", body: form });
+    if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
+    local.splice(local.indexOf(entry), 1);
+    showError("");
+    refresh();
+  } catch (error) {
+    entry.status = "error"; entry.text = `échec de l'envoi : ${error.message}`;
+    render([]);
+  }
+});
+
+document.getElementById("noteForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("noteInput");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  try {
+    const response = await fetch(`${base}/notes?t=${encodeURIComponent(token)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+    });
+    if (!response.ok) throw new Error((await response.json()).detail || response.statusText);
+    showError("");
+    refresh();
+  } catch (error) {
+    input.value = text;
+    showError(`Note non envoyée : ${error.message}`);
+  }
+});
+
+let lastItems = [];
+function render(items) {
+  if (items.length) lastItems = items;
+  const all = [...local, ...lastItems];
+  document.getElementById("list").innerHTML = all.map((item) => {
+    const label = item.kind === "note" ? "📝 note envoyée ✓"
+      : item.status === "done" ? "📷 analysée ✓" : item.status === "error" ? "📷 erreur" : item.status === "upload" ? "📷 envoi…" : "📷 envoyée, analyse…";
+    const cls = item.status === "done" ? "ok" : item.status === "error" ? "bad" : "";
+    return `<li><div class="state ${cls}">${label}</div>${esc(item.text)}</li>`;
+  }).join("");
+}
+
+async function refresh() {
+  try {
+    const response = await fetch(`${base}/slides?t=${encodeURIComponent(token)}`);
+    if (response.status === 403) { showError("Lien invalide : rescanne le QR code."); return; }
+    if (response.ok) render(await response.json());
+  } catch (_) {
+    showError("Mac injoignable (même réseau wifi ?)");
+  }
+}
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
