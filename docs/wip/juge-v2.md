@@ -11,7 +11,14 @@ Arrêt anticipé si le score plafonne ou régresse deux fois.
 | Itération | Score | Corrections |
 |---|---|---|
 | 1 | 46/72 (A 11, B 16, C 11, D 8) | carte (stabilité, colonnes, comparaison, masquage), UI (rattrapage, décor, contraste, libellés), note (Testez-vous, callouts, ancres) ; clignotement des encadrés photo corrigé |
-| 2 | 49/72 (A 14, B 15, C 10, D 10) | en cours : arêtes, encodage du type par position, cadrage, masquage réversible, badge traduction, transcription figée, étiquettes d'arêtes, plan des sujets |
+| 2 | 49/72 (A 14, B 15, C 10, D 10) | arêtes, encodage du type par position, cadrage, masquage réversible, badge traduction, transcription figée, étiquettes d'arêtes, plan des sujets, menu « ⋯ Plus », fin de session |
 
 ## Prochaine étape
-Corrections de l'itération 2 en cours (3 lots : map.js / app.js+css / Python). Ensuite capture v2-iter-3. Reporté : correction de termes Whisper par l'utilisateur.
+Arrêt demandé par l'utilisateur après les corrections de l'itération 2 (itération 3 non lancée).
+Pour reprendre : capture `.judge/v2-iter-3` puis juge neuf avec `docs/judge/v2/brief.md`.
+
+Points ouverts :
+- Routes `POST /api/map/hide` et `/api/map/unhide` absentes du backend (masquage persisté seulement en localStorage).
+- Comparaison à une seule tête : seulement exigée dans le prompt, pas validée en code.
+- Non vu à l'écran : bouton « Voir » du rattrapage, toast « Annuler » du masquage, états « … » / « ⚠ » du badge Traduction.
+- Correction de termes Whisper par l'utilisateur (reportée).
