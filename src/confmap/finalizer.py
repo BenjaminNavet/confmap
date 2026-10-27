@@ -29,7 +29,8 @@ from confmap.vault_writer import (
 log = logging.getLogger(__name__)
 
 STEPS = ("retranscribe", "retranslate", "summary", "write")
-RETRANSLATE_WORDS = 1500
+RETRANSLATE_WORDS = 500
+RETRANSLATE_TIMEOUT = 180
 
 SUMMARY_SYSTEM = """Tu rédiges, en français, le compte rendu d'une conférence pour les notes d'un chercheur.
 Tu reçois la transcription traduite, ses notes, le texte des slides photographiées et la carte des idées.
@@ -213,13 +214,23 @@ class Finalizer:
                 if all(s.lang == "fr" for s in batch):
                     translations = {s.id: s.text for s in batch}
                 else:
-                    translations = await self.runtime.call_llm(
-                        "retranslate",
-                        model,
-                        lambda items=items: translate_batch(
-                            self.runtime.llm, model, context, [], items
-                        ),
-                    )
+                    try:
+                        translations = await self.runtime.call_llm(
+                            "retranslate",
+                            model,
+                            lambda items=items: translate_batch(
+                                self.runtime.llm,
+                                model,
+                                context,
+                                [],
+                                items,
+                                timeout=RETRANSLATE_TIMEOUT,
+                            ),
+                        )
+                    except LlmError as error:
+                        # Lot abandonné : la note retombe sur la traduction du direct.
+                        log.warning("re-traduction d'un lot abandonnée : %s", error)
+                        translations = {}
                 for s in batch:
                     if s.id in translations:
                         self.runtime.emit(
@@ -290,7 +301,7 @@ class Finalizer:
 
         async def call():
             result = await self.runtime.llm.complete(
-                model, SUMMARY_SYSTEM, prompt, schema=SUMMARY_SCHEMA, timeout=180
+                model, SUMMARY_SYSTEM, prompt, schema=SUMMARY_SCHEMA, timeout=300
             )
             if not result.data:
                 raise LlmError("résumé vide")

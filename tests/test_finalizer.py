@@ -97,3 +97,11 @@ async def test_resume_after_summary_failure(prepared, fake_llm, tmp_path):
     assert ("summary", "done") in after and ("write", "done") in after
     assert len(fake_llm.prompts("summary")) == summary_calls + 1
     assert prepared.session.is_finalized()
+
+
+async def test_retranslate_batch_failure_does_not_block(prepared, fake_llm, tmp_path):
+    fake_llm.failures["translate"] = [LlmError("un"), LlmError("deux")]
+    note_path = await Finalizer(prepared, tmp_path / "vault").run()
+    assert note_path is not None
+    assert ("retranslate", "done") in step_events(prepared)
+    assert prepared.session.is_finalized()

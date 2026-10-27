@@ -134,6 +134,27 @@ async def test_network_failure_then_recovery(make_runtime, fake_llm, monkeypatch
         assert len(events_of(runtime, LlmUsageEvent)) == 1
 
 
+async def test_repeated_timeouts_give_up(make_runtime, fake_llm, monkeypatch):
+    from confmap.llm import LlmTimeout
+
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(delay, *args):
+        await real_sleep(min(delay, 0.01))
+
+    monkeypatch.setattr(runtime_module.asyncio, "sleep", fast_sleep)
+    fake_llm.failures["translate"] = [LlmTimeout("lent")] * runtime_module.MAX_TIMEOUTS
+    runtime = make_runtime()
+    async with running(runtime):
+        segment = runtime.emit(SegmentEvent(ts=0, t0=0, t1=2, lang="de", text="Hallo"))
+        runtime.start_workers()
+        runtime._translate_wakeup.set()
+        await wait_until(lambda: segment.id in runtime.state.translations)
+        # abandon après MAX_TIMEOUTS délais dépassés : l'original est gardé
+        assert runtime.state.translations[segment.id] == "[de] Hallo"
+        assert len(fake_llm.prompts("translate")) == runtime_module.MAX_TIMEOUTS
+
+
 async def test_llm_error_twice_keeps_original(make_runtime, fake_llm):
     from confmap.llm import LlmError
 

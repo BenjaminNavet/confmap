@@ -28,7 +28,7 @@ from confmap.events import (
     TranslationEvent,
     new_id,
 )
-from confmap.llm import LlmClient, LlmError, LlmResult, NetworkUnavailable
+from confmap.llm import LlmClient, LlmError, LlmResult, LlmTimeout, NetworkUnavailable
 from confmap.map_model import apply_update, is_full
 from confmap.map_updater import ContentItem, request_update
 from confmap.segmenter import Segmenter, SpeechDetector, SpeechSegment
@@ -44,6 +44,9 @@ T = TypeVar("T")
 MAX_LAG_SECONDS = 15.0
 TRANSLATE_BATCH = 8
 RETRY_MAX_SECONDS = 30.0
+# Délais dépassés d'affilée avant d'abandonner : une requête trop longue pour son délai
+# échouerait à l'infini, alors qu'une vraie coupure réseau fait échouer claude tout de suite.
+MAX_TIMEOUTS = 3
 
 
 @dataclass
@@ -364,10 +367,12 @@ class SessionRuntime:
     ) -> T:
         """Exécute un appel LLM ; réessaie indéfiniment tant que le réseau manque.
 
-        Les erreurs non réseau sont relancées après une seule nouvelle tentative.
+        Les erreurs non réseau sont relancées après une seule nouvelle tentative,
+        et l'appel abandonne après MAX_TIMEOUTS délais dépassés d'affilée.
         """
         delay = 1.0
         attempts = 0
+        timeouts = 0
         self._pending_llm += 1
         try:
             while True:
@@ -376,6 +381,12 @@ class SessionRuntime:
                 try:
                     value, result = await call()
                 except NetworkUnavailable as error:
+                    timeouts = timeouts + 1 if isinstance(error, LlmTimeout) else 0
+                    if timeouts >= MAX_TIMEOUTS:
+                        self._set_network(True)
+                        raise LlmError(
+                            f"{error} ({MAX_TIMEOUTS} fois de suite)"
+                        ) from error
                     self._set_network(False, str(error))
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, RETRY_MAX_SECONDS)

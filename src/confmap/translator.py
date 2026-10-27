@@ -69,6 +69,7 @@ async def translate_batch(
     context: str,
     history: list[TranslatedPair],
     segments: list[SegmentToTranslate],
+    timeout: float = 45,
 ) -> tuple[dict[str, str], LlmResult]:
     """Traduit un lot ; retourne {id du segment: traduction} et la réponse brute."""
     result = await client.complete(
@@ -76,7 +77,7 @@ async def translate_batch(
         SYSTEM,
         build_prompt(context, history, segments),
         schema=SCHEMA,
-        timeout=45,
+        timeout=timeout,
     )
     wanted = {segment.id for segment in segments}
     translations: dict[str, str] = {}

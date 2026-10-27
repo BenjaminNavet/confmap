@@ -16,6 +16,7 @@ const ui = {
   cost: 0,
   clock: { ts: 0, wall: 0, recording: false },
   steps: {},
+  finalizing: false,
   outputPath: "",
   autoScroll: true,
   map: null,
@@ -165,6 +166,7 @@ async function refreshSessionInfo() {
     const info = await api(`/api/sessions/${ui.sessionId}`);
     if (info.id !== ui.sessionId) return; // réponse tardive d'une autre session
     ui.clock.recording = info.recording;
+    ui.finalizing = info.finalizing;
     ui.clock.ts = Math.max(ui.clock.ts, info.elapsed || 0);
     ui.clock.wall = Date.now() / 1000;
     $("stopBtn").textContent = info.finalized ? "✓ Finalisée" : "■ Fin";
@@ -175,6 +177,7 @@ async function refreshSessionInfo() {
     pause.textContent = info.recording ? "⏸ Pause" : "▶ Reprendre";
     pause.dataset.mode = info.recording ? "pause" : "resume";
     if (info.finalizing || (Object.keys(info.finalize_steps).length && !info.finalized)) showFinalModal();
+    else renderFinalSteps();
     updateRecBadge();
   } catch (_) { /* hors ligne */ }
 }
@@ -396,7 +399,9 @@ function renderFinalSteps() {
     if (event && event.state === "error") failed = true;
     list.appendChild(li);
   }
-  $("retryFinalBtn").classList.toggle("hidden", !failed);
+  // Interrompue (serveur relancé) : aucune tâche ne tourne, il faut pouvoir reprendre.
+  const interrupted = !ui.finalizing && !ui.outputPath && Object.keys(ui.steps).length > 0;
+  $("retryFinalBtn").classList.toggle("hidden", !failed && !interrupted);
   const result = $("finalResult");
   if (ui.outputPath) {
     const vaultName = ui.outputPath.split("/").slice(0, -1).join("/");
@@ -405,7 +410,9 @@ function renderFinalSteps() {
     $("stopBtn").dataset.mode = "done";
     $("stopBtn").textContent = "✓ Finalisée";
   } else {
-    result.textContent = failed ? "La finalisation s'est arrêtée sur une erreur." : "En cours… (tu peux fermer cette fenêtre)";
+    result.textContent = failed ? "La finalisation s'est arrêtée sur une erreur."
+      : interrupted ? "La finalisation a été interrompue (serveur relancé)."
+      : "En cours… (tu peux fermer cette fenêtre)";
   }
 }
 
@@ -502,7 +509,9 @@ function init() {
   };
   $("stopBtn").onclick = onStop;
   $("pauseBtn").onclick = onPause;
-  $("retryFinalBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/finalize`, { method: "POST" }).catch((e) => toast(e.message));
+  $("retryFinalBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/finalize`, { method: "POST" })
+    .then(() => { ui.finalizing = true; renderFinalSteps(); })
+    .catch((e) => toast(e.message));
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.onclick = () => button.closest(".overlay").classList.add("hidden");
   });

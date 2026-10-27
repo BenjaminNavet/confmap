@@ -38,6 +38,10 @@ class NetworkUnavailable(LlmError):
     """Le service n'est pas joignable : l'appel peut être retenté plus tard."""
 
 
+class LlmTimeout(NetworkUnavailable):
+    """Pas de réponse dans le délai : réseau coupé, ou requête trop longue pour ce délai."""
+
+
 @dataclass
 class ImageInput:
     """Image envoyée au modèle."""
@@ -162,7 +166,7 @@ class ClaudeCliClient:
         except TimeoutError as error:
             process.kill()
             await process.wait()
-            raise NetworkUnavailable(f"pas de réponse en {timeout:.0f} s") from error
+            raise LlmTimeout(f"pas de réponse en {timeout:.0f} s") from error
         return parse_cli_output(
             stdout.decode("utf-8", "replace"),
             stderr.decode("utf-8", "replace"),
