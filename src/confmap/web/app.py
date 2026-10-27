@@ -217,6 +217,14 @@ def create_app(services: AppServices) -> FastAPI:
     app.state.services = services
     app.add_middleware(SameOriginMiddleware, port=services.settings.server.port)
 
+    @app.middleware("http")
+    async def no_stale_frontend(request: Request, call_next):
+        # Le navigateur revalide toujours l'interface : une mise à jour est vue au rechargement.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith(("/static", "/capture")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     def capture_base() -> str:
         return f"http://{lan_ip()}:{services.settings.server.port}"
 

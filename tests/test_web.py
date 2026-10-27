@@ -152,3 +152,8 @@ def test_port_in_use_detects_listening_socket():
         port = server.getsockname()[1]
         assert port_in_use(port)
     assert not port_in_use(port)
+
+
+def test_frontend_is_never_served_stale(client):
+    response = client.get("/static/app.js")
+    assert response.headers["cache-control"] == "no-cache"
