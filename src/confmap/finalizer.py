@@ -385,4 +385,4 @@ class Finalizer:
             transcript=lines,
         )
         note_path = write_conference(data, self.vault_root)
-        return {"output_path": str(note_path)}
+        return {"output_path": str(note_path.resolve())}
