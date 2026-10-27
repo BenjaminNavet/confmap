@@ -23,6 +23,10 @@ const ui = {
   contextTimer: null,
   stopArmed: false,
   reconnectDelay: 1000,
+  arrivals: new Map(), // id de segment -> heure d'arrivée (ms) en direct
+  awayAt: null, // heure (ms) où l'utilisateur a quitté le direct
+  catchup: null, // {since, until} : surlignage des passages manqués
+  catchupTimer: null,
 };
 
 function fmtTime(seconds) {
@@ -118,8 +122,12 @@ function resetView() {
   ui.translations.clear();
   ui.cost = 0;
   renderCost();
-  setBadge("whisperBadge", "Whisper", "");
-  setBadge("netBadge", "Réseau", "");
+  ui.arrivals.clear();
+  ui.awayAt = null;
+  ui.catchup = null;
+  $("catchup").classList.add("hidden");
+  setBadge("whisperBadge", "Transcription : en attente", "");
+  setBadge("netBadge", "Traduction/IA : en attente", "");
   ui.steps = {};
   ui.outputPath = "";
   $("rows").innerHTML = "";
@@ -156,7 +164,7 @@ function connect() {
   socket.onclose = (event) => {
     if (socket !== ui.socket) return;
     if (event.code === 4404) { toast("Session introuvable"); showHome(); return; }
-    setBadge("netBadge", "Serveur ✗", "bad");
+    setBadge("netBadge", "✗ Serveur injoignable", "bad");
     setTimeout(connect, ui.reconnectDelay);
     ui.reconnectDelay = Math.min(ui.reconnectDelay * 2, 10000);
   };
@@ -198,9 +206,10 @@ function handleEvent(event, replay) {
       break;
     case "segment":
       if (event.final) break;
+      if (!replay && !ui.segments.has(event.id)) ui.arrivals.set(event.id, Date.now());
       ui.segments.set(event.id, event);
       upsertSegment(event);
-      setBadge("whisperBadge", "Whisper ✓", "ok");
+      setBadge("whisperBadge", "✓ Transcription", "ok");
       break;
     case "translation":
       ui.translations.set(event.segment_id, event.text_fr);
@@ -223,7 +232,7 @@ function handleEvent(event, replay) {
       break;
     case "llm_usage":
       ui.cost += event.cost_usd || 0;
-      if (event.ok && $("netBadge").className.indexOf("bad") === -1) setBadge("netBadge", "Réseau ✓", "ok");
+      if (event.ok && $("netBadge").className.indexOf("bad") === -1) setBadge("netBadge", "✓ Traduction/IA", "ok");
       renderCost();
       break;
     case "finalize_step":
@@ -238,15 +247,15 @@ function handleEvent(event, replay) {
 function handleStatus(event, replay) {
   if (event.component === "audio") {
     ui.clock.recording = event.state === "recording";
-    if (event.state === "error") { setBadge("recBadge", "Micro ✗", "bad"); if (!replay) toast(`Micro : ${event.detail}`, 6000); }
+    if (event.state === "error") { setBadge("recBadge", "✗ Micro", "bad pulse"); if (!replay) toast(`Micro : ${event.detail}`, 6000); }
     updateRecBadge();
     if (!replay) refreshSessionInfo();
   } else if (event.component === "whisper") {
-    if (event.state === "fallback") { setBadge("whisperBadge", "Whisper ⚠ léger", "warn"); if (!replay) toast(`Whisper trop lent : ${event.detail}`, 5000); }
-    else if (event.state === "error") setBadge("whisperBadge", "Whisper ✗", "bad");
+    if (event.state === "fallback") { setBadge("whisperBadge", "⚠ Transcription (modèle léger)", "warn"); if (!replay) toast(`Transcription trop lente : ${event.detail}`, 5000); }
+    else if (event.state === "error") setBadge("whisperBadge", "✗ Transcription", "bad");
   } else if (event.component === "network") {
-    if (event.state === "down") setBadge("netBadge", `Réseau ✗ (${event.pending} en attente)`, "bad");
-    else setBadge("netBadge", "Réseau ✓", "ok");
+    if (event.state === "down") setBadge("netBadge", `✗ Traduction/IA (${event.pending} en attente)`, "bad");
+    else setBadge("netBadge", "✓ Traduction/IA", "ok");
   } else if (event.component === "llm" && event.state === "error" && !replay) {
     toast(event.detail, 5000);
   }
@@ -265,7 +274,7 @@ function renderCost() {
 function updateRecBadge() {
   const now = ui.clock.recording ? ui.clock.ts + (Date.now() / 1000 - ui.clock.wall) : ui.clock.ts;
   if (ui.clock.recording) setBadge("recBadge", `REC ${fmtTime(now)}`, "rec");
-  else setBadge("recBadge", `⏸ ${fmtTime(now)}`, "");
+  else setBadge("recBadge", `⏸ Pause ${fmtTime(now)}`, "warn pulse");
 }
 
 // ---------- transcription ----------
@@ -323,6 +332,7 @@ function buildParagraphs() {
 
 function renderTranscript() {
   const rows = buildParagraphs();
+  const liveNow = liveClock();
   const languages = {};
   // Le dernier paragraphe parlé est mis en avant, les précédents sont atténués.
   let currentIndex = -1;
@@ -335,10 +345,12 @@ function renderTranscript() {
     for (const segment of row.segments) {
       languages[segment.lang] = (languages[segment.lang] || 0) + 1;
       const translation = ui.translations.get(segment.id);
-      if (segment.lang !== "fr") original += `<span class="s" data-id="${segment.id}">${escapeHtml(segment.text)}</span> `;
+      if (segment.lang !== "fr") original += `<span class="s${missedClass(segment.id)}" data-id="${segment.id}">${escapeHtml(segment.text)}</span> `;
       const text = segment.lang === "fr" ? segment.text : translation || "…";
       const pending = segment.lang !== "fr" && !translation ? " pending" : "";
-      french += `<span class="s${pending}" data-id="${segment.id}">${escapeHtml(text)}</span> `;
+      const waited = pending ? Math.floor(liveNow - segment.t1) : 0;
+      const latency = waited >= 3 ? ` <span class="lat">${waited} s</span>` : "";
+      french += `<span class="s${pending}${missedClass(segment.id)}" data-id="${segment.id}">${escapeHtml(text)}${latency}</span> `;
     }
     const time = `<span class="time">${fmtTime(row.t0)}</span>`;
     const current = index === currentIndex ? " current" : "";
@@ -347,6 +359,50 @@ function renderTranscript() {
   $("rows").innerHTML = html;
   const dominant = Object.entries(languages).sort((a, b) => b[1] - a[1])[0];
   $("origHeader").textContent = dominant ? `Original (${LANG_NAMES[dominant[0]] || dominant[0]})` : "Original";
+}
+
+function missedClass(segmentId) {
+  const catchup = ui.catchup;
+  if (!catchup || Date.now() > catchup.until) return "";
+  return (ui.arrivals.get(segmentId) || 0) >= catchup.since ? " missed" : "";
+}
+
+function liveClock() {
+  return ui.clock.recording ? ui.clock.ts + (Date.now() / 1000 - ui.clock.wall) : ui.clock.ts;
+}
+
+// ---------- rattrapage ----------
+// Quand l'utilisateur a quitté le direct, on mémorise l'heure ; à son retour, une ligne résume
+// ce qui est arrivé pendant l'absence (passages de transcription, nœuds de la carte, sujet).
+
+function markAway() {
+  if (ui.awayAt === null) ui.awayAt = Date.now();
+}
+
+function showCatchup() {
+  const since = ui.awayAt;
+  ui.awayAt = null;
+  if (since === null) return;
+  const seconds = Math.round((Date.now() - since) / 1000);
+  if (seconds < 5) return;
+  const paragraphs = buildParagraphs().filter((row) => row.type === "para"
+    && row.segments.some((segment) => (ui.arrivals.get(segment.id) || 0) >= since));
+  const map = ui.map;
+  const mapInfo = map && typeof map.markSince === "function" ? (map.markSince(since) || {}) : {};
+  const nodes = mapInfo.count || 0;
+  if (!paragraphs.length && !nodes) return;
+  const parts = [`${paragraphs.length} passage${paragraphs.length > 1 ? "s" : ""}`];
+  if (nodes) parts.push(`${nodes} nœud${nodes > 1 ? "s" : ""}`);
+  const topics = [].concat(mapInfo.topics || []).filter(Boolean);
+  const subject = topics.length ? ` — sujet : ${topics.slice(0, 2).join(", ")}` : "";
+  $("catchupText").textContent = `Pendant votre absence (${fmtDuration(seconds)}) : ${parts.join(", ")}${subject}`;
+  $("catchup").classList.remove("hidden");
+  ui.catchup = { since, until: Date.now() + 8000 };
+  clearTimeout(ui.catchupTimer);
+  ui.catchupTimer = setTimeout(() => { ui.catchup = null; scheduleRender(); }, 8100);
+  clearTimeout(showCatchup.hideTimer);
+  showCatchup.hideTimer = setTimeout(() => $("catchup").classList.add("hidden"), 15000);
+  scheduleRender();
 }
 
 function onTranscriptHover(event) {
@@ -409,12 +465,16 @@ function renderFinalSteps() {
   $("retryFinalBtn").classList.toggle("hidden", !failed && !interrupted);
   const result = $("finalResult");
   if (ui.outputPath) {
-    const vaultName = ui.outputPath.split("/").slice(0, -1).join("/");
-    result.innerHTML = `Note écrite : <a href="obsidian://open?path=${encodeURIComponent(ui.outputPath)}">${escapeHtml(ui.outputPath)}</a>`;
-    result.title = vaultName;
+    const noteName = ui.outputPath.split("/").pop().replace(/\.md$/, "");
+    result.innerHTML = `<div>Note écrite dans Obsidian :</div>`
+      + `<div class="note-name"><a href="obsidian://open?path=${encodeURIComponent(ui.outputPath)}">${escapeHtml(noteName)}</a></div>`
+      + `<div class="meta-line">Durée de la conférence : ${fmtDuration(ui.clock.ts)}</div>`;
+    result.title = ui.outputPath;
+    $("copyPathBtn").classList.remove("hidden");
     $("stopBtn").dataset.mode = "done";
     $("stopBtn").textContent = "✓ Finalisée";
   } else {
+    $("copyPathBtn").classList.add("hidden");
     result.textContent = failed ? "La finalisation s'est arrêtée sur une erreur."
       : interrupted ? "La finalisation a été interrompue (serveur relancé)."
       : "En cours… (tu peux fermer cette fenêtre)";
@@ -586,6 +646,11 @@ function init() {
   $("finalsBtn").onclick = showFinalizations;
   $("homeFinalsBtn").onclick = showFinalizations;
   $("pauseBtn").onclick = onPause;
+  $("copyPathBtn").onclick = () => {
+    navigator.clipboard.writeText(ui.outputPath)
+      .then(() => toast("Chemin copié", 1500))
+      .catch(() => toast(ui.outputPath, 6000));
+  };
   $("retryFinalBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/finalize`, { method: "POST" })
     .then(() => { ui.finalizing = true; renderFinalSteps(); })
     .catch((e) => toast(e.message));
@@ -597,10 +662,17 @@ function init() {
     const atBottom = transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 40;
     ui.autoScroll = atBottom;
     $("jumpBtn").classList.toggle("hidden", atBottom);
+    if (!atBottom) markAway();
+    else if (ui.awayAt !== null) showCatchup();
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) markAway();
+    else if (ui.autoScroll) showCatchup();
+  });
+  $("catchupClose").onclick = () => { $("catchup").classList.add("hidden"); ui.catchup = null; scheduleRender(); };
   transcript.addEventListener("mouseover", onTranscriptHover);
   transcript.addEventListener("click", onTranscriptClick);
-  $("jumpBtn").onclick = () => { ui.autoScroll = true; scrollToBottom(); };
+  $("jumpBtn").onclick = () => { ui.autoScroll = true; showCatchup(); scrollToBottom(); };
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     const open = [...document.querySelectorAll(".overlay:not(.hidden)")];
@@ -613,7 +685,10 @@ function init() {
       openSession(ui.lastSessionId);
     }
   });
-  setInterval(updateRecBadge, 1000);
+  setInterval(() => {
+    updateRecBadge();
+    if (ui.clock.recording && document.querySelector(".s.pending")) scheduleRender();
+  }, 1000);
   if (ui.sessionId) openSession(ui.sessionId);
   else showHome();
 }

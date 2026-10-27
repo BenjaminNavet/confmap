@@ -17,11 +17,11 @@
   <input id="speakerInput" class="ctx ctx-small" placeholder="Orateur" autocomplete="off">
   <div class="status">
     <span id="recBadge" class="badge">—</span>
-    <span id="whisperBadge" class="badge" title="Transcription locale">Whisper</span>
-    <span id="netBadge" class="badge" title="Accès à Claude">Réseau</span>
+    <span id="whisperBadge" class="badge" title="Transcription de la parole (locale)">Transcription : en attente</span>
+    <span id="netBadge" class="badge" title="Traduction et analyse par l'IA (Claude)">Traduction/IA : en attente</span>
     <span id="costBadge" class="badge" title="Coût équivalent API (payé par l'abonnement)">0,000 $</span>
   </div>
-  <button id="forceBtn" class="btn" title="Mettre à jour la carte maintenant">⚡</button>
+  <button id="forceBtn" class="btn" title="Mettre à jour la carte maintenant">⚡ Mettre à jour</button>
   <button id="finalsBtn" class="btn" title="État des finalisations">📋</button>
   <button id="qrBtn" class="btn" title="Page iPhone">📱</button>
   <button id="pauseBtn" class="btn" title="Mettre l'enregistrement en pause / le reprendre">⏸ Pause</button>
@@ -34,7 +34,10 @@
       <div class="cols-head"><div id="origHeader">Original</div><div>Français</div></div>
       <div id="rows" class="rows"></div>
     </div>
-    <button id="jumpBtn" class="jump hidden">↓ Reprendre le direct</button>
+    <div class="resume-bar">
+      <div id="catchup" class="catchup hidden" role="status"><span id="catchupText"></span><button id="catchupClose" aria-label="Fermer" title="Fermer">×</button></div>
+      <button id="jumpBtn" class="jump hidden">↓ Reprendre le direct</button>
+    </div>
     <form id="noteForm" class="note-form">
       <textarea id="noteInput" rows="2" placeholder="✎ Note (Entrée = envoyer, Maj+Entrée = retour à la ligne)"></textarea>
     </form>
@@ -42,8 +45,8 @@
   <section class="pane right">
     <div id="map" class="map"></div>
     <div class="map-tools">
-      <button id="fitBtn" class="btn" title="Tout voir et suivre">⤢</button>
-      <button id="tidyBtn" class="btn" title="Réorganiser">↻ Tidy</button>
+      <button id="fitBtn" class="btn" title="Tout voir et suivre">⤢ Tout voir</button>
+      <button id="tidyBtn" class="btn" title="Réorganiser">↻ Réorganiser</button>
       <button id="sourceBtn" class="btn" title="Contenu à l'origine des derniers ajouts">📄 Source</button>
     </div>
     <div id="sourceBox" class="source-box hidden"></div>
@@ -78,8 +81,9 @@
   <div class="card">
     <h2>Finalisation</h2>
     <ol id="finalSteps" class="final-steps"></ol>
-    <p id="finalResult" class="small"></p>
+    <div id="finalResult" class="final-result small"></div>
     <div class="row">
+      <button id="copyPathBtn" class="btn hidden">Copier le chemin</button>
       <button id="retryFinalBtn" class="btn hidden">Reprendre la finalisation</button>
       <button id="finalNewBtn" class="btn btn-primary">● Nouvelle conférence</button>
       <button class="btn" data-close>Fermer</button>
