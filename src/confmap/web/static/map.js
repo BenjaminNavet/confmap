@@ -33,6 +33,10 @@ class IdeaMap {
     this.lastSource = "";
     this.positionTimer = null;
     this.placed = new Set(); // nœuds déjà positionnés à l'écran (ne bougent plus)
+    this.addedAt = new Map(); // id du nœud -> heure d'ajout (ms)
+    this.sessionId = null;
+    this.hidden = new Set();
+    this.loadHidden();
     this.cy = cytoscape({
       container,
             minZoom: 0.15,
@@ -43,6 +47,66 @@ class IdeaMap {
     const takeOver = () => { if (!this.programmatic) this.follow = false; };
     this.cy.on("pan zoom", takeOver);
     this.cy.on("dragfree", "node", () => this.reportPositions());
+    // Contrôle humain : clic droit sur un nœud = le masquer (avec ses arêtes).
+    container.addEventListener("contextmenu", (event) => event.preventDefault());
+    this.cy.on("cxttap", "node.idea", (event) => this.hideNode(event.target.id()));
+  }
+
+  currentSessionId() {
+    return this.sessionId || new URLSearchParams(location.search).get("s") || "default";
+  }
+
+  setSessionId(id) {
+    this.sessionId = id;
+    this.loadHidden();
+  }
+
+  loadHidden() {
+    this.hiddenKey = this.currentSessionId();
+    try { this.hidden = new Set(JSON.parse(localStorage.getItem("confmap.hidden." + this.currentSessionId()) || "[]")); }
+    catch { this.hidden = new Set(); }
+  }
+
+  hiddenNodeIds() {
+    if (this.hiddenKey !== this.currentSessionId()) this.loadHidden();
+    return [...this.hidden];
+  }
+
+  hideNode(nodeId) {
+    if (this.hiddenKey !== this.currentSessionId()) this.loadHidden();
+    this.hidden.add(nodeId);
+    try { localStorage.setItem("confmap.hidden." + this.currentSessionId(), JSON.stringify([...this.hidden])); } catch { /* stockage indisponible */ }
+    this.applyHidden();
+    try {
+      fetch("/api/map/hide", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node_id: nodeId, session_id: this.currentSessionId() }) }).catch(() => {});
+    } catch { /* le serveur pourra l'ajouter plus tard */ }
+  }
+
+  applyHidden() {
+    if (this.hiddenKey !== this.currentSessionId()) this.loadHidden();
+    this.cy.batch(() => {
+      this.hidden.forEach((id) => {
+        const node = this.cy.getElementById(id);
+        if (node.empty()) return;
+        node.addClass("user-hidden");
+        node.connectedEdges().addClass("user-hidden");
+      });
+    });
+  }
+
+  // Surligne (8 s) les nœuds ajoutés depuis `timestampMs` ; renvoie leur nombre et leurs sujets.
+  markSince(timestampMs) {
+    const nodes = this.cy.nodes(".idea").filter((n) => (this.addedAt.get(n.id()) || 0) >= timestampMs && !n.hasClass("user-hidden"));
+    const topicLabels = [];
+    nodes.forEach((n) => {
+      const topic = this.topics.find((t) => t.id === n.data("parent"));
+      const title = topic ? topic.title : "";
+      if (title && !topicLabels.includes(title)) topicLabels.push(title);
+    });
+    nodes.addClass("fresh");
+    clearTimeout(this.markTimer);
+    this.markTimer = setTimeout(() => nodes.removeClass("fresh"), FRESH_MS);
+    return { count: nodes.length, topics: topicLabels };
   }
 
   styles() {
@@ -106,9 +170,12 @@ class IdeaMap {
           "text-background-opacity": 0.9,
           "text-background-padding": 3,
           "text-wrap": "wrap",
-          "text-max-width": 140,
+          "text-max-width": 200,
+          "text-margin-y": -11,
         },
       },
+      { selector: "edge.dup", style: { label: "" } },
+      { selector: ".user-hidden", style: { display: "none" } },
       { selector: "node.idea.fresh", style: { "border-color": cssVar("--fresh-glow"), "border-width": 3, "underlay-color": cssVar("--fresh-glow"), "underlay-opacity": 0.45, "underlay-padding": 9 } },
       { selector: "node.idea.highlight", style: { "border-width": 4, "border-color": cssVar("--accent"), "underlay-color": cssVar("--accent"), "underlay-opacity": 0.45, "underlay-padding": 10 } },
     ];
@@ -131,6 +198,7 @@ class IdeaMap {
     const cy = this.cy;
     const changed = [];
     this.newIds = new Set();
+    const newTopicIds = [];
     cy.batch(() => {
       for (const topic of this.topics) {
         const signature = JSON.stringify([topic.title, topic.nodes.map((n) => n.id), topic.edges.map((e) => e.from + ">" + e.to)]);
@@ -139,6 +207,7 @@ class IdeaMap {
         changed.push(topic.id);
         const info = KIND_INFO[topic.kind] || KIND_INFO.process;
         if (cy.getElementById(topic.id).empty()) {
+          newTopicIds.push(topic.id);
           cy.add({ group: "nodes", data: { id: topic.id, label: `${info.icon} ${topic.title}`, kind: topic.kind }, classes: "topic" });
         } else {
           cy.getElementById(topic.id).data("label", `${info.icon} ${topic.title}`);
@@ -148,6 +217,7 @@ class IdeaMap {
           const label = `${node.emoji ? node.emoji + " " : ""}${node.label}`;
           cy.add({ group: "nodes", data: { id: node.id, parent: topic.id, label, kind: topic.kind, sources: node.sources || [], ...this.nodeSize(label) }, classes: "idea" });
           this.newIds.add(node.id);
+          this.addedAt.set(node.id, Date.now());
         }
         for (const edge of topic.edges) {
           const id = `${edge.from}->${edge.to}`;
@@ -157,7 +227,7 @@ class IdeaMap {
         }
       }
     });
-    if (changed.length) this.layoutTopics(changed);
+    if (changed.length) { this.dedupeEdgeLabels(); this.layoutTopics(changed); this.applyHidden(); }
     const fresh = cy.collection(addedIds.map((id) => cy.getElementById(id)).filter((ele) => ele.nonempty()));
     // Un seul signal à la fois : le dernier nœud ajouté.
     const newest = fresh.nonempty() ? fresh[fresh.length - 1] : null;
@@ -167,7 +237,7 @@ class IdeaMap {
       clearTimeout(this.freshTimer);
       this.freshTimer = setTimeout(() => newest.removeClass("fresh"), FRESH_MS);
     }
-    if (this.follow) this.followLatest(fresh);
+    if (this.follow) this.followLatest(fresh, newTopicIds.length > 0);
     return changed.length;
   }
 
@@ -195,14 +265,16 @@ class IdeaMap {
       if (kept.size === kids.length) {
         kids.forEach((k) => k.position(kept.get(k.id())));
       } else {
-        this.runTopicLayout(topic, kids);
+        const hubInfo = this.hubShape(kids);
+        if (hubInfo) this.placeHubColumn(hubInfo, kept);
+        else this.runTopicLayout(topic, kids);
         if (kept.size === 0) {
           // Nouveau sujet : à droite du précédent, en haut.
           const box = kids.boundingBox();
           const dx = this.topicAnchorX(index) - box.x1;
           const dy = 0 - box.y1;
           kids.positions((k) => ({ x: k.position("x") + dx, y: k.position("y") + dy }));
-        } else {
+        } else if (!hubInfo) {
           // Sujet qui grandit : on aligne la nouvelle disposition sur l'ancienne,
           // les anciens nœuds reprennent leur place, seuls les nouveaux arrivent.
           let dx = 0, dy = 0;
@@ -217,16 +289,51 @@ class IdeaMap {
       }
       kids.forEach((k) => this.placed.add(k.id()));
     });
-    // Un sujet qui a grandi ne doit pas recouvrir le suivant : on décale les suivants.
-    this.topics.forEach((topic, index) => {
-      if (index === 0) return;
-      const kids = cy.getElementById(topic.id).children();
-      if (kids.empty()) return;
-      const minX = this.topicAnchorX(index);
-      const box = kids.boundingBox();
-      if (box.x1 < minX) kids.positions((k) => ({ x: k.position("x") + (minX - box.x1), y: k.position("y") }));
-    });
     this.reportPositions();
+  }
+
+  // Étiquettes identiques sortant d'un même nœud : une seule reste affichée.
+  dedupeEdgeLabels() {
+    this.cy.batch(() => {
+      this.cy.nodes().forEach((node) => {
+        const seen = new Set();
+        node.outgoers("edge").forEach((edge) => {
+          const label = edge.data("label");
+          if (!label) return;
+          if (seen.has(label)) edge.addClass("dup"); else { seen.add(label); edge.removeClass("dup"); }
+        });
+      });
+    });
+  }
+
+  // Un nœud d'où partent ≥ 3 flèches vers des feuilles : hub à gauche, cibles en colonne à droite.
+  hubShape(kids) {
+    const edges = kids.connectedEdges();
+    const hubs = kids.filter((n) => edges.filter((e) => e.source().same(n)).length >= 3);
+    if (hubs.length !== 1) return null;
+    const hub = hubs[0];
+    const targets = kids.difference(hub);
+    const onlyHub = targets.every((t) => t.connectedEdges().every((e) => e.source().same(hub) || e.target().same(hub)));
+    return onlyHub && targets.length >= 3 ? { hub, targets } : null;
+  }
+
+  // Place hub et cibles ; les nœuds déjà posés (`kept`) ne bougent pas, les nouvelles cibles
+  // s'empilent sous la colonne existante.
+  placeHubColumn({ hub, targets }, kept) {
+    const gap = NODE_MARGIN + 6;
+    const keptTargets = targets.filter((t) => kept.has(t.id()));
+    const columnX = keptTargets.nonempty()
+      ? kept.get(keptTargets[0].id()).x
+      : hub.data("w") / 2 + 200 + Math.max(...targets.map((t) => t.data("w"))) / 2;
+    let bottom = keptTargets.nonempty() ? Math.max(...keptTargets.map((t) => kept.get(t.id()).y + t.data("h") / 2)) + gap : 0;
+    targets.forEach((t) => {
+      if (kept.has(t.id())) { t.position(kept.get(t.id())); return; }
+      t.position({ x: columnX, y: bottom + t.data("h") / 2 });
+      bottom += t.data("h") + gap;
+    });
+    if (kept.has(hub.id())) { hub.position(kept.get(hub.id())); return; }
+    const ys = targets.map((t) => t.position("y"));
+    hub.position({ x: columnX - hub.data("w") / 2 - 200 - Math.max(...targets.map((t) => t.data("w"))) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 });
   }
 
   runTopicLayout(topic, kids) {
@@ -268,32 +375,36 @@ class IdeaMap {
     });
   }
 
-  // Comparaison de gauche à droite : éléments comparés empilés à gauche, colonne de
-  // caractéristiques à droite (celles du 1er, les partagées, celles du suivant...).
-  // Chaque élément fait face aux siennes : les flèches ne traversent aucune boîte.
+  // Comparaison en colonnes (même logique de groupes que _comparison_groups de l'export) :
+  // chaque élément comparé est une tête de colonne, ses caractéristiques sont dessous ;
+  // les caractéristiques communes (liées à plusieurs têtes) ou sans lien vont au centre, plus bas.
   layoutComparison(kids) {
     const edges = kids.connectedEdges();
     const sources = kids.filter((n) => edges.some((e) => e.source().same(n)) && !edges.some((e) => e.target().same(n)));
     if (sources.length < 2) return false;
-    const order = sources.map((n) => n.id());
-    const linkedOf = (n) => edges.filter((e) => e.target().same(n) && order.includes(e.source().id()))
-      .map((e) => e.source().id()).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    const ordered = [];
-    for (const id of order) {
-      kids.difference(sources).forEach((n) => { const linked = linkedOf(n); if (linked[0] === id && !ordered.includes(n)) ordered.push(n); });
-    }
-    kids.difference(sources).forEach((n) => { if (!ordered.includes(n)) ordered.push(n); });
-    const columnX = Math.max(...sources.map((n) => n.data("w"))) / 2 + 180 + Math.max(...ordered.map((n) => n.data("w"))) / 2;
-    let y = 0;
-    for (const n of ordered) { n.position({ x: columnX, y: y + n.data("h") / 2 }); y += n.data("h") + 22; }
-    let previousBottom = -Infinity;
-    sources.forEach((n) => {
-      const targets = edges.filter((e) => e.source().same(n)).map((e) => e.target());
-      const center = targets.length ? targets.reduce((sum, t) => sum + t.position("y"), 0) / targets.length : 0;
-      const h = n.data("h");
-      const top = Math.max(center - h / 2, previousBottom + 30);
-      n.position({ x: 0, y: top + h / 2 });
-      previousBottom = top + h;
+    const sourceIds = sources.map((n) => n.id());
+    const members = kids.difference(sources);
+    const linkedOf = (n) => edges.filter((e) => e.target().same(n) && sourceIds.includes(e.source().id())).map((e) => sourceIds.indexOf(e.source().id()));
+    const columnWidth = Math.max(...kids.map((n) => n.data("w"))) + 90;
+    const columnOf = (index) => index * columnWidth;
+    const rowGap = NODE_MARGIN + 6;
+    const headBottom = Math.max(...sources.map((n) => n.data("h")));
+    sources.forEach((n, i) => n.position({ x: columnOf(i), y: n.data("h") / 2 }));
+    const cursors = sources.map(() => headBottom + 46);
+    const common = [];
+    members.forEach((n) => {
+      const linked = linkedOf(n);
+      if (linked.length === 1) {
+        const i = linked[0];
+        n.position({ x: columnOf(i), y: cursors[i] + n.data("h") / 2 });
+        cursors[i] += n.data("h") + rowGap;
+      } else common.push({ n, linked });
+    });
+    let commonY = Math.max(...cursors) + 20;
+    common.forEach(({ n, linked }) => {
+      const x = linked.length ? linked.reduce((sum, i) => sum + columnOf(i), 0) / linked.length : columnOf((sources.length - 1) / 2);
+      n.position({ x, y: commonY + n.data("h") / 2 });
+      commonY += n.data("h") + rowGap;
     });
     return true;
   }
@@ -335,26 +446,54 @@ class IdeaMap {
     this.fit(true);
   }
 
-  followLatest(fresh) {
-    // Suivi du direct : on cadre le sujet courant en entier si le texte reste lisible
-    // (zoom ≥ MIN_FOLLOW_ZOOM) ; sinon on garde ce zoom et on centre sur les derniers ajouts.
-    const cy = this.cy;
-    const last = this.topics.length ? cy.getElementById(this.topics[this.topics.length - 1].id) : null;
-    if (!last || last.empty()) return;
-    const topic = last.union(last.descendants());
-    const padding = 30;
-    const box = topic.boundingBox();
-    const fitZoom = Math.min((cy.width() - 2 * padding) / box.w, (cy.height() - 2 * padding) / box.h);
-    this.programmatic = true;
-    if (fitZoom >= 0.6) {
-      // Le sujet entier reste visible, quitte à descendre un peu sous le zoom de lecture.
-      cy.zoom(Math.min(1.3, fitZoom));
-      cy.center(topic);
-    } else {
-      cy.zoom(MIN_FOLLOW_ZOOM);
-      cy.center(fresh && fresh.nonempty() ? fresh : topic);
+  // Marges de cadrage (px écran) : la barre d'outils de la carte ne doit rien masquer.
+  viewInsets() {
+    const tools = this.container.parentElement && this.container.parentElement.querySelector(".map-tools");
+    let bottom = 24;
+    if (tools) {
+      const toolsBox = tools.getBoundingClientRect();
+      const containerBox = this.container.getBoundingClientRect();
+      const overlap = containerBox.bottom - toolsBox.top;
+      if (overlap > 0) bottom = overlap + 16;
     }
-    this.programmatic = false;
+    return { top: 24, left: 24, right: 24, bottom };
+  }
+
+  followLatest(fresh, hasNewTopic) {
+    // Nouveau sujet : on le cadre (zoom lisible). Sinon, pas de zoom ni de re-cadrage :
+    // simple panoramique minimal si les nouveaux nœuds sortent de la zone visible.
+    const cy = this.cy;
+    const inset = this.viewInsets();
+    const areaW = cy.width() - inset.left - inset.right;
+    const areaH = cy.height() - inset.top - inset.bottom;
+    this.programmatic = true;
+    try {
+      if (hasNewTopic) {
+        const last = this.topics.length ? cy.getElementById(this.topics[this.topics.length - 1].id) : null;
+        if (!last || last.empty()) return;
+        const box = last.union(last.descendants()).boundingBox();
+        const fitZoom = Math.min(areaW / box.w, areaH / box.h);
+        const zoom = fitZoom >= 0.6 ? Math.min(1.3, fitZoom) : MIN_FOLLOW_ZOOM;
+        // Si le sujet est trop grand pour la zone, on montre son début (coin haut-gauche).
+        const centerX = fitZoom >= 0.6 ? (box.x1 + box.x2) / 2 : box.x1 + areaW / zoom / 2;
+        const centerY = fitZoom >= 0.6 ? (box.y1 + box.y2) / 2 : box.y1 + areaH / zoom / 2;
+        cy.zoom(zoom);
+        cy.pan({ x: inset.left + areaW / 2 - centerX * zoom, y: inset.top + areaH / 2 - centerY * zoom });
+      } else if (fresh && fresh.nonempty()) {
+        const zoom = cy.zoom();
+        const pan = cy.pan();
+        const box = fresh.boundingBox();
+        const screen = { x1: box.x1 * zoom + pan.x, x2: box.x2 * zoom + pan.x, y1: box.y1 * zoom + pan.y, y2: box.y2 * zoom + pan.y };
+        let dx = 0, dy = 0;
+        if (screen.x2 > cy.width() - inset.right) dx = cy.width() - inset.right - screen.x2;
+        if (screen.x1 + dx < inset.left) dx = inset.left - screen.x1;
+        if (screen.y2 > cy.height() - inset.bottom) dy = cy.height() - inset.bottom - screen.y2;
+        if (screen.y1 + dy < inset.top) dy = inset.top - screen.y1;
+        if (dx || dy) cy.pan({ x: pan.x + dx, y: pan.y + dy });
+      }
+    } finally {
+      this.programmatic = false;
+    }
   }
 
   fit(animate) {
@@ -362,9 +501,16 @@ class IdeaMap {
     if (this.cy.elements().empty()) return;
     this.programmatic = true;
     if (animate) {
-      this.cy.animate({ fit: { eles: this.cy.elements(), padding: 40 } }, { duration: 300, complete: () => { this.programmatic = false; } });
+      this.cy.animate({ fit: { eles: this.cy.elements(), padding: Math.max(40, this.viewInsets().bottom) } }, { duration: 300, complete: () => { this.programmatic = false; } });
     } else {
       this.cy.fit(this.cy.elements(), 40);
+      const inset = this.viewInsets();
+      if (inset.bottom > 40) {
+        const zoom = Math.min(this.cy.zoom(), (this.cy.height() - inset.top - inset.bottom) / this.cy.elements().boundingBox().h);
+        this.cy.zoom(zoom);
+        const box = this.cy.elements().boundingBox();
+        this.cy.pan({ x: this.cy.width() / 2 - ((box.x1 + box.x2) / 2) * zoom, y: inset.top + (this.cy.height() - inset.top - inset.bottom) / 2 - ((box.y1 + box.y2) / 2) * zoom });
+      }
       if (this.cy.zoom() > 1.2) this.cy.zoom({ level: 1.2, renderedPosition: { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 } });
       this.programmatic = false;
     }
