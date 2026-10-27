@@ -151,7 +151,9 @@ def capture_ui(out: Path) -> None:
                     path=shots / f"{index + 6:02d}-finalisation-{step:02d}.png"
                 )
             step += 1
-            if text.strip():
+            vault_written = any((JUDGE_DIR / "vault").rglob("*.canvas"))
+            if vault_written or ("En cours" not in text and text.strip()):
+                page.wait_for_timeout(3000)
                 break
         page.screenshot(path=shots / f"{index + 7:02d}-finalisation-fin.png")
         page.keyboard.press("Escape")
