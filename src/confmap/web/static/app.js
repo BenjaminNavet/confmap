@@ -450,6 +450,76 @@ async function onStop() {
   }
 }
 
+// ---------- menu des finalisations ----------
+
+const FINAL_STATES = {
+  running: "… en cours", interrupted: "⏸ interrompue", error: "✗ en échec",
+  done: "✓ terminée", not_started: "non finalisée",
+};
+
+function fmtDuration(seconds) {
+  return seconds < 60 ? `${Math.round(seconds)} s` : `${Math.floor(seconds / 60)} min ${String(Math.round(seconds % 60)).padStart(2, "0")}`;
+}
+
+async function showFinalizations() {
+  $("finalsModal").classList.remove("hidden");
+  await refreshFinalizations();
+  clearInterval(ui.finalsTimer);
+  ui.finalsTimer = setInterval(() => {
+    if ($("finalsModal").classList.contains("hidden")) { clearInterval(ui.finalsTimer); return; }
+    refreshFinalizations();
+  }, 2000);
+}
+
+async function refreshFinalizations() {
+  let items = [];
+  try { items = await api("/api/finalizations"); } catch (error) { toast(error.message); return; }
+  const now = Date.now() / 1000;
+  const list = $("finalsList");
+  list.innerHTML = items.length ? "" : "<li class='meta'>Aucune session.</li>";
+  for (const item of items) {
+    const li = document.createElement("li");
+    const date = new Date(item.created_at * 1000).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+    const steps = Object.keys(STEP_LABELS).map((name) => {
+      const step = item.steps[name];
+      const state = step ? step.state : "todo";
+      const icon = { done: "✓", running: "…", error: "✗", todo: "·" }[state];
+      let extra = "";
+      if (step && step.started) {
+        const end = state === "running" ? now : step.ended || now;
+        extra = ` ${fmtDuration(end - step.started)}`;
+      }
+      if (state === "running" && item.progress) extra += `, ${item.progress}`;
+      return `<span class="${state}">${icon} ${STEP_LABELS[name]}${extra}</span>`;
+    }).join(" · ");
+    const errors = Object.entries(item.steps).filter(([, step]) => step.state === "error")
+      .map(([name, step]) => `<div class="err">${STEP_LABELS[name]} : ${escapeHtml(step.detail)}</div>`).join("");
+    const issue = item.issue ? `<div class="issue">⚠ ${escapeHtml(item.issue)} — nouvel essai en cours</div>` : "";
+    const note = item.output_path ? `<div class="meta"><a href="obsidian://open?path=${encodeURIComponent(item.output_path)}">Ouvrir la note dans Obsidian</a></div>` : "";
+    li.innerHTML = `<div class="head"><div><div>${escapeHtml(item.title || "(sans titre)")}</div>`
+      + `<div class="meta">${date} · ${FINAL_STATES[item.state] || item.state}</div></div><div class="actions"></div></div>`
+      + `<div class="steps">${steps}</div>${issue}${errors}${note}`;
+    const actions = li.querySelector(".actions");
+    if (["interrupted", "error", "not_started"].includes(item.state)) {
+      const relaunch = document.createElement("button");
+      relaunch.className = "btn btn-primary";
+      relaunch.textContent = item.state === "not_started" ? "Finaliser" : "Reprendre";
+      relaunch.onclick = async () => {
+        relaunch.disabled = true;
+        try { await api(`/api/sessions/${item.id}/finalize`, { method: "POST" }); } catch (error) { toast(error.message, 5000); }
+        refreshFinalizations();
+      };
+      actions.appendChild(relaunch);
+    }
+    const open = document.createElement("button");
+    open.className = "btn";
+    open.textContent = "Ouvrir";
+    open.onclick = () => { $("finalsModal").classList.add("hidden"); if (ui.sessionId !== item.id) { goHome(); openSession(item.id); } };
+    actions.appendChild(open);
+    list.appendChild(li);
+  }
+}
+
 // ---------- initialisation ----------
 
 function sendContext() {
@@ -508,6 +578,8 @@ function init() {
     $("qrModal").classList.remove("hidden");
   };
   $("stopBtn").onclick = onStop;
+  $("finalsBtn").onclick = showFinalizations;
+  $("homeFinalsBtn").onclick = showFinalizations;
   $("pauseBtn").onclick = onPause;
   $("retryFinalBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/finalize`, { method: "POST" })
     .then(() => { ui.finalizing = true; renderFinalSteps(); })

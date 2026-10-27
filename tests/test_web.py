@@ -177,3 +177,21 @@ def test_pause_then_resume(client, services):
     audio_files = services.store.load(session_id).meta.audio_files
     assert audio_files == ["enregistrement.wav", "enregistrement-2.wav"]
     assert services.runtimes[session_id].session.is_finalized() is False
+
+
+async def test_finalizations_menu(services):
+    import httpx
+
+    app = create_app(services)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as http:
+        session_id = (await http.post("/api/sessions")).json()["id"]
+        assert (await http.get("/api/finalizations")).json() == []  # en enregistrement
+        await http.post(f"/api/sessions/{session_id}/stop")
+        await services.finalize_tasks[session_id]
+        [item] = (await http.get("/api/finalizations")).json()
+    assert item["id"] == session_id and item["state"] == "done"
+    assert item["steps"]["write"]["state"] == "done"
+    assert item["output_path"]

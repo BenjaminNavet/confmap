@@ -31,7 +31,12 @@ from pydantic import BaseModel
 
 from confmap.audio import AudioSource
 from confmap.config import Settings
-from confmap.events import FinalizeStepEvent
+from confmap.events import (
+    FinalizeStepEvent,
+    SegmentEvent,
+    StatusEvent,
+    TranslationEvent,
+)
 from confmap.finalizer import Finalizer
 from confmap.llm import LlmClient
 from confmap.runtime import SessionRuntime
@@ -136,6 +141,66 @@ def session_summary(
         and not services.finalize_tasks[session.id].done(),
         "finalize_steps": last_steps,
         "capture_url": f"{request_base}/capture?s={session.id}&t={session.meta.token}",
+    }
+
+
+def finalization_status(services: AppServices, session: SessionLog) -> dict:
+    """État détaillé de la finalisation d'une session, pour le menu « Finalisations »."""
+    runtime = services.runtimes.get(session.id)
+    task = services.finalize_tasks.get(session.id)
+    running_task = task is not None and not task.done()
+    steps: dict[str, dict] = {}
+    output_path = ""
+    final_ids: set[str] = set()
+    final_end = 0.0
+    translated: set[str] = set()
+    issue = ""
+    for event in session.events:
+        if isinstance(event, FinalizeStepEvent):
+            step = steps.setdefault(event.step, {})
+            if event.state == "running":
+                step.update(state="running", started=event.wall, detail="")
+            else:
+                step.update(state=event.state, ended=event.wall, detail=event.detail)
+            output_path = event.output_path or output_path
+            issue = ""
+        elif isinstance(event, SegmentEvent) and event.final:
+            final_ids.add(event.id)
+            final_end = max(final_end, event.t1)
+        elif isinstance(event, TranslationEvent):
+            translated.add(event.segment_id)
+        elif isinstance(event, StatusEvent) and event.component == "network":
+            issue = event.detail if event.state == "down" else ""
+    current = next(
+        (name for name, step in steps.items() if step["state"] == "running"), ""
+    )
+    if session.is_finalized():
+        state = "done"
+    elif any(step["state"] == "error" for step in steps.values()):
+        state = "error"
+    elif running_task:
+        state = "running"
+    elif steps:
+        state = "interrupted"  # serveur relancé pendant la finalisation
+    else:
+        state = "not_started"
+    progress = ""
+    if current == "retranscribe":
+        progress = f"{final_end / 60:.0f} min retranscrites"
+    elif current == "retranslate" and final_ids:
+        progress = f"{len(final_ids & translated)}/{len(final_ids)} segments"
+    title = next((e.title for e in reversed(session.events) if e.type == "context"), "")
+    return {
+        "id": session.id,
+        "title": title,
+        "created_at": session.meta.created_at,
+        "recording": bool(runtime and runtime.capturing),
+        "state": state,
+        "current_step": current,
+        "steps": steps,
+        "progress": progress,
+        "issue": issue if state == "running" else "",
+        "output_path": output_path,
     }
 
 
@@ -261,6 +326,14 @@ def create_app(services: AppServices) -> FastAPI:
             session_summary(services, services.store.load(sid), base)
             for sid in services.store.list_ids()[:50]
         ]
+
+    @app.get("/api/finalizations")
+    async def list_finalizations(_: LocalOnly) -> list[dict]:
+        statuses = [
+            finalization_status(services, services.store.load(sid))
+            for sid in services.store.list_ids()[:50]
+        ]
+        return [status for status in statuses if not status["recording"]]
 
     @app.post("/api/sessions")
     async def create_session(_: LocalOnly) -> dict:

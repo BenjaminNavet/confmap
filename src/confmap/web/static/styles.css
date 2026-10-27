@@ -110,3 +110,18 @@ body {
 .row { display: flex; gap: 8px; justify-content: flex-end; }
 .toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 20; cursor: default; }
 .hidden { display: none !important; }
+
+.row-start { justify-content: flex-start; }
+.finals-card { width: min(720px, 100%); }
+.finals-list { list-style: none; padding: 0; margin: 0; }
+.finals-list li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.finals-list .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.finals-list .meta { color: var(--muted); font-size: 12px; }
+.finals-list .steps { font-size: 13px; margin-top: 4px; }
+.finals-list .steps .done { color: var(--ok); }
+.finals-list .steps .running { color: var(--warn); font-weight: 600; }
+.finals-list .steps .error { color: var(--danger); }
+.finals-list .steps .todo { color: var(--muted); }
+.finals-list .issue { color: var(--warn); font-size: 12px; margin-top: 2px; }
+.finals-list .err { color: var(--danger); font-size: 12px; margin-top: 2px; }
+.finals-list .actions { display: flex; gap: 6px; }
