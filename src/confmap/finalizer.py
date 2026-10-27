@@ -175,7 +175,9 @@ class Finalizer:
                 self.settings.models.whisper_final,
                 language,
                 build_initial_prompt(
-                    self.runtime.state.title, self.runtime.state.speaker
+                    self.runtime.state.title,
+                    self.runtime.state.speaker,
+                    " ".join(item.text for item in self._note_items()),
                 ),
             )
             for piece in pieces:

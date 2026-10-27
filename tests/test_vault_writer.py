@@ -381,3 +381,16 @@ def test_canvas_groups_wrap_into_rows_without_overlap():
     for group in groups:
         topic_id = group["id"].removeprefix("g-")
         assert all(contains(group, by_id[f"{topic_id}n{j}"]) for j in range(3))
+
+
+def test_canvas_levels_follow_parent_order() -> None:
+    """Les enfants sont rangés comme leurs parents : pas de croisement évitable."""
+    from confmap.vault_writer import _topic_node_boxes
+
+    topic = {
+        "kind": "comparison",
+        "nodes": [{"id": i, "label": i} for i in ["A", "B", "a1", "b1"]],
+        "edges": [{"from": "B", "to": "b1"}, {"from": "A", "to": "a1"}],
+    }
+    boxes = {box.node["id"]: box for box in _topic_node_boxes(topic)}
+    assert (boxes["A"].x < boxes["B"].x) == (boxes["a1"].x < boxes["b1"].x)

@@ -125,3 +125,12 @@ def test_build_initial_prompt():
         build_initial_prompt("Graphes", "Ada") == "Conférence : Graphes. Orateur : Ada."
     )
     assert build_initial_prompt("Graphes", "") == "Conférence : Graphes."
+
+
+def test_initial_prompt_includes_glossary() -> None:
+    """Le texte des slides et notes sert de vocabulaire à Whisper, tronqué."""
+    from confmap.transcriber import GLOSSARY_MAX_CHARS, build_initial_prompt
+
+    prompt = build_initial_prompt("Titre", "", "knowledge graph   Huawei " * 100)
+    assert prompt.startswith("Conférence : Titre. Vocabulaire : knowledge graph Huawei")
+    assert len(prompt) <= len("Conférence : Titre. Vocabulaire : ") + GLOSSARY_MAX_CHARS

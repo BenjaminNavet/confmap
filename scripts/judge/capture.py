@@ -25,6 +25,20 @@ JUDGE_DIR = ROOT / ".judge"
 PORT = 8011
 BASE = f"http://127.0.0.1:{PORT}"
 REPLAY_SECONDS = 95
+SLIDE_HTML = """<html><body style="margin:0;width:1280px;height:720px;background:#fff;font:28px Helvetica;padding:50px;box-sizing:border-box">
+<h1 style="font-size:52px;margin:0 0 30px">Knowledge Graphs in industry: 2018 vs 2026</h1>
+<ul><li>2018: Google, Microsoft, Amazon, Facebook, eBay, IBM</li>
+<li>2026: + Huawei, Tencent, Alibaba, IKEA, Siemens, Bosch</li>
+<li>Ontologies and knowledge graphs across all areas of society and the economy</li></ul>
+<p style="color:#888">ISWC 2026 keynote</p></body></html>"""
+
+
+def make_slide(browser, path: Path) -> None:
+    """Fabrique une photo de slide de démonstration (texte lisible par la vision)."""
+    page = browser.new_page(viewport={"width": 1280, "height": 720})
+    page.set_content(SLIDE_HTML)
+    page.screenshot(path=path)
+    page.close()
 
 
 def start_server(log_path: Path) -> subprocess.Popen:
@@ -85,6 +99,13 @@ def capture_ui(out: Path) -> None:
         started = time.time()
         index = 1
         noted = False
+        slide_sent = False
+        page.click("#qrBtn")
+        page.wait_for_timeout(800)
+        capture_url = re.sub(
+            r"^https?://[^/]+", BASE, page.get_attribute("#captureLink", "href") or ""
+        )
+        page.keyboard.press("Escape")
         while time.time() - started < REPLAY_SECONDS:
             page.wait_for_timeout(15000)
             page.screenshot(
@@ -98,6 +119,20 @@ def capture_ui(out: Path) -> None:
                 )
                 page.press("#noteInput", "Enter")
                 noted = True
+            if not slide_sent and capture_url and time.time() - started > 25:
+                slide_path = out / "slide-demo.png"
+                make_slide(browser, slide_path)
+                phone = browser.new_page(
+                    viewport={"width": 390, "height": 844},
+                    is_mobile=True,
+                    color_scheme="dark",
+                )
+                phone.goto(capture_url)
+                phone.wait_for_timeout(800)
+                phone.set_input_files("#photoInput", str(slide_path))
+                phone.wait_for_timeout(1500)
+                phone.close()
+                slide_sent = True
         page.click("#forceBtn")
         page.wait_for_timeout(20000)
         page.screenshot(path=shots / f"{index:02d}-carte-forcee.png")

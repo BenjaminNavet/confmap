@@ -244,7 +244,7 @@ class IdeaMap {
         for (let i = 0; i < steps && !found; i++) {
           // Commence vers le bas puis tourne : les ajouts restent sous leur parent si possible.
           const angle = Math.PI / 2 + (2 * Math.PI * i) / steps;
-          const p = { x: origin.x + Math.cos(angle) * radius * 1.6, y: origin.y + Math.sin(angle) * radius };
+          const p = { x: origin.x + Math.cos(angle) * radius * 1.2, y: origin.y + Math.sin(angle) * radius };
           if (free(node, p)) found = p;
         }
         if (found) { node.position(found); return; }
@@ -300,7 +300,8 @@ class IdeaMap {
     const box = topic.boundingBox();
     const fitZoom = Math.min((cy.width() - 2 * padding) / box.w, (cy.height() - 2 * padding) / box.h);
     this.programmatic = true;
-    if (fitZoom >= MIN_FOLLOW_ZOOM) {
+    if (fitZoom >= MIN_FOLLOW_ZOOM * 0.85) {
+      // Le sujet entier reste visible, quitte à descendre un peu sous le zoom de lecture.
       cy.zoom(Math.min(1.3, fitZoom));
       cy.center(topic);
     } else {

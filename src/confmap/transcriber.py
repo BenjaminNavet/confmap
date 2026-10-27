@@ -57,14 +57,27 @@ class Transcriber(Protocol):
         ...
 
 
-def build_initial_prompt(title: str, speaker: str) -> str | None:
-    """Amorce Whisper avec le contexte de la conférence (None si le titre est vide)."""
+GLOSSARY_MAX_CHARS = 600
+
+
+def build_initial_prompt(title: str, speaker: str, glossary: str = "") -> str | None:
+    """Amorce Whisper avec le contexte de la conférence (None si le titre est vide).
+
+    Args:
+        title: Titre de la conférence.
+        speaker: Orateur.
+        glossary: Texte fiable (slides, notes) dont Whisper reprendra l'orthographe
+            des termes techniques et noms propres ; tronqué à GLOSSARY_MAX_CHARS.
+    """
     title = title.strip()
     if not title:
         return None
     prompt = f"Conférence : {title}."
     if speaker.strip():
         prompt += f" Orateur : {speaker.strip()}."
+    glossary = " ".join(glossary.split())[:GLOSSARY_MAX_CHARS]
+    if glossary:
+        prompt += f" Vocabulaire : {glossary}"
     return prompt
 
 

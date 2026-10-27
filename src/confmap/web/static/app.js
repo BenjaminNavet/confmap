@@ -274,7 +274,7 @@ function updateRecBadge() {
 // au bout d'une minute, ou quand une note / une photo s'intercale.
 
 const PARAGRAPH_GAP = 4;
-const PARAGRAPH_MAX = 60;
+const PARAGRAPH_MAX = 30;
 const LANG_NAMES = { en: "anglais", es: "espagnol", de: "allemand", it: "italien", pt: "portugais", fr: "français", nl: "néerlandais", zh: "chinois", ja: "japonais", ru: "russe", ar: "arabe" };
 
 function upsertSegment(segment) {

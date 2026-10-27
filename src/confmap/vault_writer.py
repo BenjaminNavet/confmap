@@ -349,6 +349,23 @@ def _node_levels(topic: dict) -> dict[str, int]:
     return levels
 
 
+def _order_by_barycenter(topic: dict, boxes_by_level: dict[int, list[_Box]]) -> None:
+    """Range chaque niveau selon la position moyenne des parents (moins de croisements)."""
+    parents: dict[str, list[str]] = {}
+    for edge in topic.get("edges", []):
+        parents.setdefault(edge.get("to"), []).append(edge.get("from"))
+    rank: dict[str, float] = {}
+    for level in sorted(boxes_by_level):
+        level_boxes = boxes_by_level[level]
+        for index, box in enumerate(level_boxes):
+            ranks = [rank[p] for p in parents.get(box.node["id"], []) if p in rank]
+            box_key = sum(ranks) / len(ranks) if ranks else float(index)
+            rank.setdefault(box.node["id"], box_key)
+        level_boxes.sort(key=lambda b: rank[b.node["id"]])
+        for index, box in enumerate(level_boxes):
+            rank[box.node["id"]] = float(index)
+
+
 def _topic_node_boxes(topic: dict) -> list[_Box]:
     """Dispose les nœuds d'un sujet en niveaux réguliers, sans chevauchement.
 
@@ -371,6 +388,7 @@ def _topic_node_boxes(topic: dict) -> list[_Box]:
     def thickness(box: _Box) -> int:
         return box.width if horizontal else box.height
 
+    _order_by_barycenter(topic, boxes_by_level)
     level_sizes = {
         level: sum(extent(b) for b in level_boxes)
         + LEVEL_NODE_GAP * (len(level_boxes) - 1)
