@@ -15,6 +15,8 @@ const NODE_MARGIN = 30;
 // Zoom minimal en suivi du direct : le texte des nœuds reste à ~14 px à l'écran.
 const MIN_FOLLOW_ZOOM = 0.95;
 
+const FONT = '"SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888";
 }
@@ -50,23 +52,30 @@ class IdeaMap {
         selector: "node.topic",
         style: {
           shape: "round-rectangle",
-          "background-color": cssVar("--group-bg"),
+          "corner-radius": 18,
+          "background-color": kindColor,
+          "background-opacity": 0.06,
           "border-color": kindColor,
-          "border-width": 2,
+          "border-opacity": 0.55,
+          "border-width": 1.5,
           label: "data(label)",
           "text-valign": "top",
           "text-halign": "center",
-          "text-margin-y": -6,
-          "font-size": 15,
+          "text-margin-y": -8,
+          "font-family": FONT,
+          "font-size": 16,
           "font-weight": 700,
           color: kindColor,
-          padding: 24,
+          padding: 26,
         },
       },
       {
         selector: "node.idea",
         style: {
           shape: "round-rectangle",
+          "corner-radius": 10,
+          "font-family": FONT,
+          "font-weight": 500,
           "background-color": cssVar("--node-bg"),
           "border-color": cssVar("--node-border"),
           "border-width": 1.5,
@@ -83,11 +92,13 @@ class IdeaMap {
       {
         selector: "edge",
         style: {
-          width: 1.4,
+          width: 1.6,
           "curve-style": "bezier",
           "target-arrow-shape": "triangle",
-          "line-color": cssVar("--faint"),
-          "target-arrow-color": cssVar("--faint"),
+          "arrow-scale": 0.9,
+          "line-color": cssVar("--node-border"),
+          "target-arrow-color": cssVar("--node-border"),
+          "font-family": FONT,
           label: "data(label)",
           "font-size": 13,
           color: cssVar("--muted"),

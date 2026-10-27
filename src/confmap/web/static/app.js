@@ -264,7 +264,7 @@ function renderCost() {
 
 function updateRecBadge() {
   const now = ui.clock.recording ? ui.clock.ts + (Date.now() / 1000 - ui.clock.wall) : ui.clock.ts;
-  if (ui.clock.recording) setBadge("recBadge", `● REC ${fmtTime(now)}`, "rec");
+  if (ui.clock.recording) setBadge("recBadge", `REC ${fmtTime(now)}`, "rec");
   else setBadge("recBadge", `⏸ ${fmtTime(now)}`, "");
 }
 
