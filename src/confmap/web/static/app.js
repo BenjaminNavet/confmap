@@ -141,7 +141,7 @@ async function refreshSessionInfo() {
       $("stopBtn").textContent = "▶ Reprendre";
       $("stopBtn").dataset.mode = "resume";
     } else {
-      $("stopBtn").textContent = "■ Fin";
+      $("stopBtn").textContent = info.finalized ? "✓ Finalisée" : "■ Fin";
       $("stopBtn").dataset.mode = info.finalized ? "done" : "stop";
     }
     if (info.finalizing || (Object.keys(info.finalize_steps).length && !info.finalized)) showFinalModal();
