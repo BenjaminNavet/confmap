@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,7 +18,9 @@ TOPIC_ICONS = {
     "concept": "💡",
     "comparison": "⚖️",
 }
-MAX_MERMAID_TOPICS = 25
+# Sens de lecture du diagramme Mermaid selon la nature du sujet.
+MERMAID_DIRECTIONS = {"process": "LR", "timeline": "LR"}
+DEFAULT_MERMAID_DIRECTION = "TD"
 MAX_TITLE_LENGTH = 80
 FALLBACK_TITLE = "Conférence"
 PARAGRAPH_MAX_SECONDS = 45.0
@@ -26,8 +30,15 @@ FALLBACK_COLUMN_WIDTH = 320
 FALLBACK_COLUMN_GAP = 80
 FALLBACK_NODE_SPACING = 100
 NODE_HEIGHT = 60
+NODE_LINE_HEIGHT = 26
+NODE_VERTICAL_PADDING = 28
+NODE_HORIZONTAL_PADDING = 24
+CHAR_WIDTH = 9
 NODE_MIN_WIDTH = 120
 NODE_MAX_WIDTH = 260
+# Les groupes (un par sujet) sont rangés en grille plutôt que sur une seule ligne.
+CANVAS_MAX_ROW_WIDTH = 3000
+GROUP_GAP = 120
 GROUP_PADDING = 40
 GROUP_LABEL_EXTRA = 40
 # Les boîtes du canvas Obsidian sont plus grandes que celles de l'app : on écarte
@@ -37,18 +48,9 @@ POSITION_SCALE_Y = 2.2
 BOX_MARGIN = 30
 
 _FORBIDDEN_TITLE_CHARS = re.compile(r'[/\\:*?"<>|#^\[\]]')
-_MERMAID_ESCAPES = str.maketrans(
-    {
-        "(": "（",
-        ")": "）",
-        "[": "［",
-        "]": "］",
-        "{": "｛",
-        "}": "｝",
-        '"': "'",
-        "\n": " ",
-        "\r": " ",
-    }
+# Entités Mermaid : une étiquette entre guillemets ne doit contenir ni " ni # brut.
+_MERMAID_ENTITIES = str.maketrans(
+    {"#": "#35;", '"': "#quot;", "<": "#lt;", ">": "#gt;", "\n": " ", "\r": " "}
 )
 
 
@@ -132,9 +134,9 @@ def _yaml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _escape_mermaid(label: str) -> str:
-    """Neutralise les caractères qui cassent la syntaxe mindmap Mermaid."""
-    return label.translate(_MERMAID_ESCAPES).strip()
+def _mermaid_text(label: str) -> str:
+    """Rend une étiquette sûre à placer entre guillemets dans un flowchart Mermaid."""
+    return re.sub(r"\s+", " ", label.translate(_MERMAID_ENTITIES)).strip()
 
 
 def _topic_icon(topic: dict) -> str:
@@ -173,12 +175,38 @@ def _render_summary(summary: Summary) -> str:
     return "\n".join(parts)
 
 
+def _node_text(node: dict) -> str:
+    return f"{node.get('emoji', '')} {node.get('label', '')}".strip()
+
+
+def _render_topic_flowchart(topic: dict) -> list[str]:
+    """Traduit un sujet de la carte en flowchart Mermaid (nœuds et flèches)."""
+    direction = MERMAID_DIRECTIONS.get(topic.get("kind", ""), DEFAULT_MERMAID_DIRECTION)
+    mermaid_ids = {
+        node["id"]: f"n{index}" for index, node in enumerate(topic.get("nodes", []))
+    }
+    lines = ["```mermaid", f"flowchart {direction}"]
+    for node in topic.get("nodes", []):
+        lines.append(f'    {mermaid_ids[node["id"]]}["{_mermaid_text(_node_text(node))}"]')
+    for edge in topic.get("edges", []):
+        source = mermaid_ids.get(edge.get("from"))
+        target = mermaid_ids.get(edge.get("to"))
+        if source is None or target is None:
+            continue
+        label = _mermaid_text(edge.get("label", ""))
+        arrow = f'-->|"{label}"|' if label else "-->"
+        lines.append(f"    {source} {arrow} {target}")
+    lines.append("```")
+    return lines
+
+
 def _render_map_section(data: FinalNoteData, canvas_filename: str) -> str:
-    mindmap = ["```mermaid", "mindmap", f"  root(({_escape_mermaid(data.title)}))"]
-    for topic in data.topics[:MAX_MERMAID_TOPICS]:
-        mindmap.append(f"    {_escape_mermaid(_topic_label(topic))}")
-    mindmap.append("```")
-    return "\n".join(["## Carte", "", *mindmap, "", f"![[{canvas_filename}]]"])
+    parts = ["## Carte", "", f"Vue d'ensemble : [[{canvas_filename}|carte complète]]"]
+    for topic in data.topics:
+        parts += ["", f"### {_topic_label(topic)}"]
+        if topic.get("nodes"):
+            parts += ["", *_render_topic_flowchart(topic)]
+    return "\n".join(parts)
 
 
 def _render_notes(notes: list[NoteItem]) -> str:
@@ -258,51 +286,86 @@ def _node_width(text: str) -> int:
     return max(NODE_MIN_WIDTH, min(NODE_MAX_WIDTH, 40 + 8 * len(text)))
 
 
+def _node_height(text: str, width: int) -> int:
+    """Hauteur suffisante pour afficher tout le texte (retour à la ligne compris)."""
+    chars_per_line = max(1, (width - NODE_HORIZONTAL_PADDING) // CHAR_WIDTH)
+    line_count = max(1, math.ceil(len(text) / chars_per_line))
+    return max(NODE_HEIGHT, NODE_VERTICAL_PADDING + NODE_LINE_HEIGHT * line_count)
+
+
+@dataclass
+class _Box:
+    """Boîte d'un nœud sur le canvas (coin haut-gauche)."""
+
+    node: dict
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+
+
 def _topic_node_boxes(
     topic: dict, topic_index: int, positions: dict[str, tuple[float, float]]
-) -> list[tuple[dict, str, int, int, int]]:
-    """Calcule (noeud, texte, x, y, largeur) du coin haut-gauche de chaque noeud."""
+) -> list[_Box]:
+    """Calcule la boîte de chaque nœud d'un sujet, sans chevauchement."""
     nodes = topic.get("nodes", [])
-    texts = [
-        f"{node.get('emoji', '')} {node.get('label', '')}".strip() for node in nodes
-    ]
-    widths = [_node_width(text) for text in texts]
     use_positions = bool(nodes) and all(node["id"] in positions for node in nodes)
-    boxes = []
     column_x = topic_index * (FALLBACK_COLUMN_WIDTH + FALLBACK_COLUMN_GAP)
-    for row, (node, text, width) in enumerate(zip(nodes, texts, widths, strict=True)):
+    boxes = []
+    for row, node in enumerate(nodes):
+        text = _node_text(node)
+        width = _node_width(text)
+        height = _node_height(text, width)
         if use_positions:
             center_x, center_y = positions[node["id"]]
-            center_x *= POSITION_SCALE_X
-            center_y *= POSITION_SCALE_Y
-            x = round(center_x - width / 2)
-            y = round(center_y - NODE_HEIGHT / 2)
+            x = round(center_x * POSITION_SCALE_X - width / 2)
+            y = round(center_y * POSITION_SCALE_Y - height / 2)
         else:
             x = column_x + GROUP_PADDING
             y = GROUP_PADDING + GROUP_LABEL_EXTRA + row * FALLBACK_NODE_SPACING
-        boxes.append((node, text, x, y, width))
+        boxes.append(_Box(node, text, x, y, width, height))
     return _resolve_overlaps(boxes)
 
 
-def _resolve_overlaps(
-    boxes: list[tuple[dict, str, int, int, int]],
-) -> list[tuple[dict, str, int, int, int]]:
+def _resolve_overlaps(boxes: list[_Box]) -> list[_Box]:
     """Décale vers le bas les boîtes qui se chevauchent encore (avec une marge)."""
-    placed: list[list] = []
-    for box in sorted(boxes, key=lambda b: (b[3], b[2])):
-        node, text, x, y, width = box
+    placed: list[_Box] = []
+    for box in sorted(boxes, key=lambda b: (b.y, b.x)):
         moved = True
         while moved:
             moved = False
-            for _, _, other_x, other_y, other_width in placed:
-                overlap_x = x < other_x + other_width + BOX_MARGIN and other_x < x + width + BOX_MARGIN
-                overlap_y = y < other_y + NODE_HEIGHT + BOX_MARGIN and other_y < y + NODE_HEIGHT + BOX_MARGIN
+            for other in placed:
+                overlap_x = box.x < other.x + other.width + BOX_MARGIN and other.x < box.x + box.width + BOX_MARGIN
+                overlap_y = box.y < other.y + other.height + BOX_MARGIN and other.y < box.y + box.height + BOX_MARGIN
                 if overlap_x and overlap_y:
-                    y = other_y + NODE_HEIGHT + BOX_MARGIN
+                    box.y = other.y + other.height + BOX_MARGIN
                     moved = True
-        placed.append([node, text, x, y, width])
-    order = {id(b[0]): i for i, b in enumerate(boxes)}
-    return [tuple(b) for b in sorted(placed, key=lambda b: order[id(b[0])])]
+        placed.append(box)
+    return boxes
+
+
+def _pack_groups(topic_boxes: list[list[_Box]]) -> None:
+    """Range les sujets en grille (lignes de largeur bornée), en place.
+
+    La disposition interne de chaque sujet est conservée ; seuls les sujets
+    sont déplacés, pour éviter un canvas d'une seule ligne très large.
+    """
+    cursor_x = cursor_y = row_height = 0
+    for boxes in topic_boxes:
+        if not boxes:
+            continue
+        min_x = min(b.x for b in boxes) - GROUP_PADDING
+        min_y = min(b.y for b in boxes) - GROUP_PADDING - GROUP_LABEL_EXTRA
+        width = max(b.x + b.width for b in boxes) + GROUP_PADDING - min_x
+        height = max(b.y + b.height for b in boxes) + GROUP_PADDING - min_y
+        if cursor_x and cursor_x + width > CANVAS_MAX_ROW_WIDTH:
+            cursor_x, cursor_y, row_height = 0, cursor_y + row_height + GROUP_GAP, 0
+        for box in boxes:
+            box.x += cursor_x - min_x
+            box.y += cursor_y - min_y
+        cursor_x += width + GROUP_GAP
+        row_height = max(row_height, height)
 
 
 def _unique_id(wanted: str, used_ids: set[str]) -> str:
@@ -329,31 +392,31 @@ def render_canvas(data: FinalNoteData) -> dict[str, Any]:
     edges: list[dict[str, Any]] = []
     used_ids: set[str] = set()
 
-    for topic_index, topic in enumerate(data.topics):
-        boxes = _topic_node_boxes(topic, topic_index, data.positions)
+    topic_boxes = [
+        _topic_node_boxes(topic, topic_index, data.positions)
+        for topic_index, topic in enumerate(data.topics)
+    ]
+    _pack_groups(topic_boxes)
+    for topic_index, (topic, boxes) in enumerate(zip(data.topics, topic_boxes, strict=True)):
         if not boxes:
             continue
         canvas_ids: dict[str, str] = {}
-        for node, text, x, y, width in boxes:
-            canvas_id = _unique_id(str(node["id"]), used_ids)
-            canvas_ids[node["id"]] = canvas_id
+        for box in boxes:
+            canvas_id = _unique_id(str(box.node["id"]), used_ids)
+            canvas_ids[box.node["id"]] = canvas_id
             text_nodes.append(
                 {
                     "id": canvas_id,
                     "type": "text",
-                    "text": text,
-                    "x": x,
-                    "y": y,
-                    "width": width,
-                    "height": NODE_HEIGHT,
+                    "text": box.text,
+                    "x": box.x,
+                    "y": box.y,
+                    "width": box.width,
+                    "height": box.height,
                 }
             )
-        min_x = min(x for _, _, x, _, _ in boxes)
-        min_y = min(y for _, _, _, y, _ in boxes)
-        max_x = max(x + width for _, _, x, _, width in boxes)
-        max_y = max(y + NODE_HEIGHT for _, _, _, y, _ in boxes)
-        group_x = min_x - GROUP_PADDING
-        group_y = min_y - GROUP_PADDING - GROUP_LABEL_EXTRA
+        group_x = min(b.x for b in boxes) - GROUP_PADDING
+        group_y = min(b.y for b in boxes) - GROUP_PADDING - GROUP_LABEL_EXTRA
         group_nodes.append(
             {
                 "id": _unique_id(f"g-{topic.get('id', topic_index)}", used_ids),
@@ -361,8 +424,8 @@ def render_canvas(data: FinalNoteData) -> dict[str, Any]:
                 "label": _topic_label(topic),
                 "x": group_x,
                 "y": group_y,
-                "width": max_x + GROUP_PADDING - group_x,
-                "height": max_y + GROUP_PADDING - group_y,
+                "width": max(b.x + b.width for b in boxes) + GROUP_PADDING - group_x,
+                "height": max(b.y + b.height for b in boxes) + GROUP_PADDING - group_y,
             }
         )
         for edge_index, edge in enumerate(topic.get("edges", [])):

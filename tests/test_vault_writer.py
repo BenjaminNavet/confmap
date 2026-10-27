@@ -83,7 +83,7 @@ def test_frontmatter_and_sections():
     ]
     assert "**Points clés**" in markdown and "- P2" in markdown
     assert "**Questions ouvertes**" in markdown and "- Q1" in markdown
-    assert "![[Ma Conf.canvas]]" in markdown
+    assert "[[Ma Conf.canvas|carte complète]]" in markdown
 
 
 def test_yaml_quotes_safely():
@@ -96,33 +96,44 @@ def test_no_open_questions_section_when_empty():
     assert "Questions ouvertes" not in render_markdown(data, "x.canvas")
 
 
-def test_mermaid_escaping_and_icons():
-    markdown = render_markdown(make_data(title="Conf (spéciale)"), "x.canvas")
-    block = markdown.split("```mermaid")[1].split("```")[0]
-    assert "root((Conf （spéciale）))" in block
-    assert "⚙️ Pipeline （v2） ［beta］" in block
-    assert "⏳ Histoire" in block
-    assert "(v2)" not in block
+def mermaid_blocks(markdown):
+    return [part.split("```")[0] for part in markdown.split("```mermaid")[1:]]
 
 
-def test_mermaid_max_25_topics():
-    topics = [
-        {
-            "id": f"t{i}",
-            "title": f"T{i}",
-            "kind": "concept",
-            "started_at": 0,
-            "nodes": [],
-            "edges": [],
-        }
-        for i in range(30)
-    ]
-    block = (
-        render_markdown(make_data(topics=topics), "x")
-        .split("```mermaid")[1]
-        .split("```")[0]
-    )
-    assert block.count("💡") == 25
+def test_map_section_has_one_flowchart_per_topic_with_nodes():
+    markdown = render_markdown(make_data(), "x.canvas")
+    assert "[[x.canvas|carte complète]]" in markdown
+    assert "### ⚙️ Pipeline (v2) [beta]" in markdown and "### ⏳ Histoire" in markdown
+    pipeline, history = mermaid_blocks(markdown)
+    assert "flowchart LR" in pipeline
+    assert 'n0["🅰️ Étape A"]' in pipeline and 'n1["Étape B"]' in pipeline
+    assert 'n0 -->|"puis"| n1' in pipeline
+    assert 'n0["1999"]' in history
+
+
+def test_mermaid_labels_are_escaped():
+    topic = {
+        "id": "t1",
+        "title": "T",
+        "kind": "concept",
+        "nodes": [
+            {"id": "x", "label": 'Dit "oui" #1 <b>', "emoji": ""},
+            {"id": "y", "label": "f(x) [a]", "emoji": ""},
+        ],
+        "edges": [{"from": "x", "to": "y", "label": 'a "b"'}, {"from": "x", "to": "?"}],
+    }
+    (block,) = mermaid_blocks(render_markdown(make_data(topics=[topic]), "x"))
+    assert "flowchart TD" in block
+    assert 'n0["Dit #quot;oui#quot; #35;1 #lt;b#gt;"]' in block
+    assert 'n1["f(x) [a]"]' in block
+    assert 'n0 -->|"a #quot;b#quot;"| n1' in block
+    assert block.count("-->") == 1
+
+
+def test_topic_without_nodes_has_heading_but_no_diagram():
+    topic = {"id": "t1", "title": "Vide", "kind": "concept", "nodes": [], "edges": []}
+    markdown = render_markdown(make_data(topics=[topic]), "x")
+    assert "### 💡 Vide" in markdown and "```mermaid" not in markdown
 
 
 def test_notes_sorted_and_formatted():
@@ -214,7 +225,7 @@ def test_canvas_fallback_layout():
     assert contains(group1, by_id["a"]) and contains(group1, by_id["b"])
     assert contains(group2, by_id["c"]) and not contains(group1, by_id["c"])
     assert by_id["b"]["y"] - by_id["a"]["y"] == 100
-    assert by_id["c"]["x"] - by_id["a"]["x"] == 400
+    assert by_id["c"]["x"] > by_id["a"]["x"]
     assert by_id["a"]["text"] == "🅰️ Étape A" and by_id["b"]["text"] == "Étape B"
     assert 120 <= by_id["a"]["width"] <= 260 and by_id["a"]["height"] == 60
     (edge,) = canvas["edges"]
@@ -229,9 +240,11 @@ def test_canvas_uses_positions():
     assert_canvas_valid(canvas)
     by_id = {node["id"]: node for node in canvas["nodes"]}
     node_a = by_id["a"]
+    node_b = by_id["b"]
     # Les positions de l'app sont écartées pour les boîtes plus grandes du canvas.
-    assert node_a["x"] + node_a["width"] / 2 == 500 * POSITION_SCALE_X
-    assert node_a["y"] + node_a["height"] / 2 == 300 * POSITION_SCALE_Y
+    center = lambda node: (node["x"] + node["width"] / 2, node["y"] + node["height"] / 2)  # noqa: E731
+    assert abs(center(node_b)[0] - center(node_a)[0] - 400.5 * POSITION_SCALE_X) <= 1
+    assert abs(center(node_b)[1] - center(node_a)[1] - 400 * POSITION_SCALE_Y) <= 1
     assert contains(by_id["g-t1"], by_id["a"]) and contains(by_id["g-t1"], by_id["b"])
 
 
@@ -255,7 +268,7 @@ def test_write_conference_files(tmp_path):
     assert markdown_path.name == "AB test.md"
     canvas = json.loads((folder / "AB test.canvas").read_text(encoding="utf-8"))
     assert_canvas_valid(canvas)
-    assert "![[AB test.canvas]]" in markdown_path.read_text(encoding="utf-8")
+    assert "[[AB test.canvas|carte complète]]" in markdown_path.read_text(encoding="utf-8")
 
 
 def test_existing_folder_gets_suffix_and_is_untouched(tmp_path):
@@ -268,12 +281,68 @@ def test_existing_folder_gets_suffix_and_is_untouched(tmp_path):
     assert first.read_text(encoding="utf-8") == original_content
 
 
+def boxes_overlap(a, b):
+    return (
+        a["x"] < b["x"] + b["width"]
+        and b["x"] < a["x"] + a["width"]
+        and a["y"] < b["y"] + b["height"]
+        and b["y"] < a["y"] + a["height"]
+    )
+
+
 def test_canvas_boxes_never_overlap_even_with_tight_app_positions():
-    from confmap.vault_writer import NODE_HEIGHT, _topic_node_boxes
+    from confmap.vault_writer import _topic_node_boxes
 
     topic = {"id": "t1", "nodes": [{"id": f"n{i}", "label": f"Idée assez longue numéro {i}"} for i in range(6)]}
     tight = {f"n{i}": (i * 20.0, (i % 2) * 10.0) for i in range(6)}
-    boxes = _topic_node_boxes(topic, 0, tight)
-    for i, (_, _, x1, y1, w1) in enumerate(boxes):
-        for _, _, x2, y2, w2 in boxes[i + 1 :]:
-            assert not (x1 < x2 + w2 and x2 < x1 + w1 and y1 < y2 + NODE_HEIGHT and y2 < y1 + NODE_HEIGHT)
+    boxes = [vars(box) for box in _topic_node_boxes(topic, 0, tight)]
+    for i, first in enumerate(boxes):
+        for second in boxes[i + 1 :]:
+            assert not boxes_overlap(first, second)
+
+
+def test_long_labels_get_taller_boxes():
+    from confmap.vault_writer import NODE_HEIGHT
+
+    topic = {
+        "id": "t1",
+        "title": "T",
+        "kind": "concept",
+        "nodes": [
+            {"id": "short", "label": "Court"},
+            {"id": "long", "label": "Mémoire conversationnelle personnelle (PCM)"},
+        ],
+        "edges": [],
+    }
+    by_id = {n["id"]: n for n in render_canvas(make_data(topics=[topic]))["nodes"]}
+    assert by_id["short"]["height"] == NODE_HEIGHT
+    assert by_id["long"]["height"] > NODE_HEIGHT
+
+
+def test_canvas_groups_wrap_into_rows_without_overlap():
+    from confmap.vault_writer import CANVAS_MAX_ROW_WIDTH
+
+    topics = [
+        {
+            "id": f"t{i}",
+            "title": f"T{i}",
+            "kind": "concept",
+            "nodes": [{"id": f"t{i}n{j}", "label": f"Nœud {j}"} for j in range(3)],
+            "edges": [],
+        }
+        for i in range(20)
+    ]
+    # Positions de l'app : tous les sujets sur une seule ligne très large.
+    positions = {f"t{i}n{j}": (i * 700.0 + j * 150, j * 80.0) for i in range(20) for j in range(3)}
+    canvas = render_canvas(make_data(topics=topics, positions=positions))
+    assert_canvas_valid(canvas)
+    groups = [n for n in canvas["nodes"] if n["type"] == "group"]
+    assert max(g["x"] + g["width"] for g in groups) - min(g["x"] for g in groups) <= CANVAS_MAX_ROW_WIDTH
+    assert len({g["y"] for g in groups}) > 1
+    for i, first in enumerate(groups):
+        for second in groups[i + 1 :]:
+            assert not boxes_overlap(first, second)
+    by_id = {n["id"]: n for n in canvas["nodes"]}
+    for group in groups:
+        topic_id = group["id"].removeprefix("g-")
+        assert all(contains(group, by_id[f"{topic_id}n{j}"]) for j in range(3))

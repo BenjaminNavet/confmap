@@ -13,3 +13,5 @@
 **Pistes v2** : intervalle de carte adaptatif pour réduire le coût, édition des nœuds dans l'UI, export PDF.
 
 **Retours v1.1** (2026-10-27) : lancement Spotlight (`scripts/install_app.sh`), thème sombre, transcription en deux colonnes alignées par paragraphe (nouveau paragraphe après 4 s de pause, 1 min, ou une note/photo). Corrigé : le `~` du vault par défaut n'était pas développé (note écrite dans `./~/…`).
+
+**Carte dans Obsidian** (2026-10-27) : le mindmap Mermaid (titres seuls, illisible) est remplacé par un `flowchart` par sujet (nœuds + flèches étiquetées, LR pour process/timeline, TD sinon) ; le canvas n'est plus intégré mais lié, ses sujets sont rangés en grille (≤ 3000 px de large) et les boîtes s'agrandissent pour les étiquettes longues.
