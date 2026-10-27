@@ -215,7 +215,7 @@ def test_recall_questions_section_with_collapsed_callouts():
         for t in (0, 8, 60, 66)
     ]
     markdown = render_markdown(make_data(summary=summary, transcript=lines), "x")
-    assert "> [!question]- Qui ?\n> Réponse : Ada [[[#^t-0100|01:10]]]" in markdown
+    assert "> [!question]- Qui ?\n> Réponse : Ada ([[#^t-0100|01:10]])" in markdown
     assert "> [!question]- Quand ?\n> Réponse : Hier\n" in markdown
     assert (
         markdown.index("Points clés")
@@ -235,8 +235,8 @@ def test_key_point_timestamps_link_to_previous_paragraph():
     ]
     summary = Summary(overview="o", key_points=["[01:30] Fait", "[00:10] Autre"])
     markdown = render_markdown(make_data(summary=summary, transcript=lines), "x")
-    assert "- [[[#^t-0100|01:30]]] Fait" in markdown
-    assert "- [[[#^t-0000|00:10]]] Autre" in markdown
+    assert "- [[#^t-0100|01:30]] Fait" in markdown
+    assert "- [[#^t-0000|00:10]] Autre" in markdown
     assert "^t-0100" in markdown
 
 

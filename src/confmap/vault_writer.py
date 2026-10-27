@@ -220,7 +220,7 @@ class _TranscriptAnchors:
         if not self.starts:
             return text
         return _TIMESTAMP_PATTERN.sub(
-            lambda match: f"[{self.link(_parse_timestamp(match.group(1)))}]", text
+            lambda match: self.link(_parse_timestamp(match.group(1))), text
         )
 
 
@@ -235,7 +235,7 @@ def _render_recall_questions(
         answer = f"> Réponse : {item.answer.strip()}"
         stamp = item.timestamp.strip("[] ")
         if _TIMESTAMP_PATTERN.fullmatch(f"[{stamp}]"):
-            answer += f" [{anchors.link(_parse_timestamp(stamp))}]"
+            answer += f" ({anchors.link(_parse_timestamp(stamp))})"
         parts.append(answer)
     return parts
 
