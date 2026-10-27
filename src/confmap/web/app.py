@@ -101,6 +101,18 @@ class PositionsBody(BaseModel):
     positions: dict[str, tuple[float, float]]
 
 
+def local_only(request: Request) -> None:
+    """Dépendance : réserve la route aux clients locaux (le Mac)."""
+    host = request.client.host if request.client else ""
+    if host not in LOCAL_HOSTS:
+        raise HTTPException(403, "réservé au Mac")
+
+
+# Défini au niveau du module : avec `from __future__ import annotations`, FastAPI
+# doit pouvoir résoudre cet alias depuis les globals du module.
+LocalOnly = Annotated[None, Depends(local_only)]
+
+
 def lan_ip() -> str:
     """Adresse IP du Mac sur le réseau local (aucun paquet n'est envoyé)."""
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
@@ -156,13 +168,6 @@ def create_app(services: AppServices) -> FastAPI:
         if host not in LOCAL_HOSTS and token != session.meta.token:
             raise HTTPException(403, "jeton invalide")
         return session
-
-    def local_only(request: Request) -> None:
-        host = request.client.host if request.client else ""
-        if host not in LOCAL_HOSTS:
-            raise HTTPException(403, "réservé au Mac")
-
-    LocalOnly = Annotated[None, Depends(local_only)]
 
     @app.get("/")
     async def index() -> FileResponse:
