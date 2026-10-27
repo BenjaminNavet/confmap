@@ -36,7 +36,7 @@ body {
   padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
   flex-wrap: wrap;
 }
-.brand { font-weight: 700; margin-right: 4px; }
+.brand { font-weight: 700; margin-right: 4px; cursor: pointer; }
 .ctx {
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
   background: var(--bg); color: var(--text); font: inherit; flex: 1 1 220px; min-width: 120px;

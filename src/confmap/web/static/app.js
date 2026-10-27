@@ -50,6 +50,18 @@ async function api(path, options = {}) {
 
 // ---------- accueil ----------
 
+function goHome() {
+  // Quitte la session affichée (elle continue côté serveur : finalisation, etc.).
+  const socket = ui.socket;
+  ui.socket = null;
+  if (socket) socket.close();
+  ui.sessionId = null;
+  history.replaceState(null, "", "/");
+  document.title = "confmap";
+  document.querySelectorAll(".overlay").forEach((el) => el.classList.add("hidden"));
+  showHome();
+}
+
 async function showHome() {
   $("home").classList.remove("hidden");
   const list = $("sessionList");
@@ -435,6 +447,9 @@ function init() {
     },
   });
   $("newBtn").onclick = newSession;
+  $("homeBtn").onclick = goHome;
+  $("brand").onclick = goHome;
+  $("finalNewBtn").onclick = () => { goHome(); newSession(); };
   $("titleInput").oninput = sendContext;
   $("speakerInput").oninput = sendContext;
   $("noteInput").addEventListener("keydown", (event) => {

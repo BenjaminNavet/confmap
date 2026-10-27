@@ -11,7 +11,8 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">confmap</div>
+  <button id="homeBtn" class="btn" title="Accueil : sessions et nouvelle conférence">⌂ Accueil</button>
+  <div id="brand" class="brand" title="Accueil">confmap</div>
   <input id="titleInput" class="ctx" placeholder="Titre de la conférence" autocomplete="off">
   <input id="speakerInput" class="ctx ctx-small" placeholder="Orateur" autocomplete="off">
   <div class="status">
@@ -75,6 +76,7 @@
     <p id="finalResult" class="small"></p>
     <div class="row">
       <button id="retryFinalBtn" class="btn hidden">Reprendre la finalisation</button>
+      <button id="finalNewBtn" class="btn btn-primary">● Nouvelle conférence</button>
       <button class="btn" data-close>Fermer</button>
     </div>
   </div>
