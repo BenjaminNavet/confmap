@@ -7,7 +7,9 @@ const STEP_LABELS = { retranscribe: "Re-transcription complète", retranslate: "
 const ui = {
   sessionId: new URLSearchParams(location.search).get("s"),
   socket: null,
-  items: new Map(), // id -> {ts, el}
+  items: new Map(), // id -> {ts, kind, segment | className+html}
+  renderPending: false,
+  hoverId: null,
   segments: new Map(),
   translations: new Map(),
   cost: 0,
@@ -95,7 +97,7 @@ function resetView() {
   ui.cost = 0;
   ui.steps = {};
   ui.outputPath = "";
-  $("transcript").innerHTML = "";
+  $("rows").innerHTML = "";
   ui.map.cy.elements().remove();
   ui.map.signatures.clear();
 }
@@ -117,7 +119,7 @@ function connect() {
         handleEvent(event, true);
       }
       if (lastMap) renderMap(lastMap, true);
-      scrollToBottom();
+      ui.autoScroll = true;
       ui.reconnectDelay = 1000;
       refreshSessionInfo();
     } else {
@@ -170,7 +172,7 @@ function handleEvent(event, replay) {
       break;
     case "translation":
       ui.translations.set(event.segment_id, event.text_fr);
-      if (ui.segments.has(event.segment_id)) upsertSegment(ui.segments.get(event.segment_id));
+      if (ui.segments.has(event.segment_id)) scheduleRender();
       break;
     case "note":
       upsertItem(event.id, event.ts, "item note", `📝 ${escapeHtml(event.text)}`);
@@ -199,7 +201,6 @@ function handleEvent(event, replay) {
       renderFinalSteps();
       break;
   }
-  if (!replay && ui.autoScroll && ["segment", "translation", "note", "slide"].includes(event.type)) scrollToBottom();
 }
 
 function handleStatus(event, replay) {
@@ -232,39 +233,96 @@ function updateRecBadge() {
 }
 
 // ---------- transcription ----------
+// Deux colonnes alignées par paragraphe : original | français.
+// Les segments s'enchaînent dans un paragraphe ; on en ouvre un nouveau après une pause,
+// au bout d'une minute, ou quand une note / une photo s'intercale.
+
+const PARAGRAPH_GAP = 4;
+const PARAGRAPH_MAX = 60;
+const LANG_NAMES = { en: "anglais", es: "espagnol", de: "allemand", it: "italien", pt: "portugais", fr: "français", nl: "néerlandais", zh: "chinois", ja: "japonais", ru: "russe", ar: "arabe" };
 
 function upsertSegment(segment) {
-  const translation = ui.translations.get(segment.id);
-  const showOriginal = segment.lang !== "fr";
-  const html = `<span class="time">${fmtTime(segment.t0)}</span>`
-    + (showOriginal ? `<div class="orig">${escapeHtml(segment.text)}</div>` : "")
-    + `<div class="fr ${translation ? "" : "pending"}">${escapeHtml(translation || (showOriginal ? "traduction…" : segment.text))}</div>`;
-  upsertItem(segment.id, segment.t0, "seg", html);
+  ui.items.set(segment.id, { ts: segment.t0, kind: "seg", segment });
+  scheduleRender();
 }
 
 function upsertItem(id, ts, className, html) {
-  let entry = ui.items.get(id);
-  if (!entry) {
-    const el = document.createElement("div");
-    el.dataset.id = id;
-    el.onclick = () => {
-      const hits = ui.map.highlightSources(id);
-      if (!hits) toast("Pas encore dans la carte", 1500);
-    };
-    entry = { ts, el };
-    ui.items.set(id, entry);
-    insertOrdered(entry);
-  }
-  entry.el.className = className;
-  entry.el.innerHTML = html;
+  ui.items.set(id, { ts, kind: "item", className, html });
+  scheduleRender();
 }
 
-function insertOrdered(entry) {
-  const container = $("transcript");
-  let after = container.lastElementChild;
-  while (after && ui.items.get(after.dataset.id).ts > entry.ts) after = after.previousElementSibling;
-  if (after) after.after(entry.el);
-  else container.prepend(entry.el);
+function scheduleRender() {
+  if (ui.renderPending) return;
+  ui.renderPending = true;
+  requestAnimationFrame(() => {
+    ui.renderPending = false;
+    renderTranscript();
+    if (ui.autoScroll) scrollToBottom();
+  });
+}
+
+function buildParagraphs() {
+  const entries = [...ui.items.entries()].sort((a, b) => a[1].ts - b[1].ts);
+  const rows = [];
+  let paragraph = null;
+  for (const [id, entry] of entries) {
+    if (entry.kind === "item") {
+      rows.push({ type: "item", id, entry });
+      paragraph = null;
+      continue;
+    }
+    const segment = entry.segment;
+    const startsNew = !paragraph
+      || segment.t0 - paragraph.t1 > PARAGRAPH_GAP
+      || segment.t1 - paragraph.t0 > PARAGRAPH_MAX;
+    if (startsNew) {
+      paragraph = { type: "para", t0: segment.t0, t1: segment.t1, segments: [] };
+      rows.push(paragraph);
+    }
+    paragraph.segments.push(segment);
+    paragraph.t1 = Math.max(paragraph.t1, segment.t1);
+  }
+  return rows;
+}
+
+function renderTranscript() {
+  const rows = buildParagraphs();
+  const languages = {};
+  const html = rows.map((row) => {
+    if (row.type === "item") {
+      return `<div class="row-item ${row.entry.className}" data-id="${row.id}">${row.entry.html}</div>`;
+    }
+    let original = "", french = "";
+    for (const segment of row.segments) {
+      languages[segment.lang] = (languages[segment.lang] || 0) + 1;
+      const translation = ui.translations.get(segment.id);
+      if (segment.lang !== "fr") original += `<span class="s" data-id="${segment.id}">${escapeHtml(segment.text)}</span> `;
+      const text = segment.lang === "fr" ? segment.text : translation || "…";
+      const pending = segment.lang !== "fr" && !translation ? " pending" : "";
+      french += `<span class="s${pending}" data-id="${segment.id}">${escapeHtml(text)}</span> `;
+    }
+    const time = `<span class="time">${fmtTime(row.t0)}</span>`;
+    return `<div class="cell orig">${time}${original}</div><div class="cell fr">${original ? "" : time}${french}</div>`;
+  }).join("");
+  $("rows").innerHTML = html;
+  const dominant = Object.entries(languages).sort((a, b) => b[1] - a[1])[0];
+  $("origHeader").textContent = dominant ? `Original (${LANG_NAMES[dominant[0]] || dominant[0]})` : "Original";
+}
+
+function onTranscriptHover(event) {
+  const span = event.target.closest(".s");
+  const id = span ? span.dataset.id : null;
+  if (id === ui.hoverId) return;
+  ui.hoverId = id;
+  $("rows").querySelectorAll(".s.hover").forEach((el) => el.classList.remove("hover"));
+  if (id) $("rows").querySelectorAll(`.s[data-id="${id}"]`).forEach((el) => el.classList.add("hover"));
+}
+
+function onTranscriptClick(event) {
+  const target = event.target.closest("[data-id]");
+  if (!target) return;
+  const hits = ui.map.highlightSources(target.dataset.id);
+  if (!hits) toast("Pas encore dans la carte", 1500);
 }
 
 function scrollToBottom() {
@@ -409,6 +467,8 @@ function init() {
     ui.autoScroll = atBottom;
     $("jumpBtn").classList.toggle("hidden", atBottom);
   });
+  transcript.addEventListener("mouseover", onTranscriptHover);
+  transcript.addEventListener("click", onTranscriptClick);
   $("jumpBtn").onclick = () => { ui.autoScroll = true; scrollToBottom(); };
   setInterval(updateRecBadge, 1000);
   if (ui.sessionId) openSession(ui.sessionId);

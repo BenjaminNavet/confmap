@@ -11,3 +11,5 @@
 **Non testé en conditions réelles** : micro du MacBook en salle (autorisation micro macOS à accorder au terminal au premier lancement), iPhone réel sur le wifi d'une conférence, coupure réseau réelle (couverte seulement par tests avec faux client).
 
 **Pistes v2** : intervalle de carte adaptatif pour réduire le coût, édition des nœuds dans l'UI, export PDF.
+
+**Retours v1.1** (2026-10-27) : lancement Spotlight (`scripts/install_app.sh`), thème sombre, transcription en deux colonnes alignées par paragraphe (nouveau paragraphe après 4 s de pause, 1 min, ou une note/photo). Corrigé : le `~` du vault par défaut n'était pas développé (note écrite dans `./~/…`).

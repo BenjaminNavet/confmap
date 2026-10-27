@@ -25,12 +25,14 @@ cp config.example.toml config.toml   # optionnel : modèles, vault, port
 uv run confmap serve
 ```
 
-Puis ouvrir <http://localhost:8010>. Au premier enregistrement, macOS demande l'autorisation d'utiliser le micro pour le terminal.
+Puis ouvrir <http://localhost:8010>.
+
+**Lancement depuis Spotlight** : `./scripts/install_app.sh` crée `~/Applications/confmap.app`. Taper « confmap » dans Spotlight démarre le serveur s'il ne tourne pas (journal : `~/Library/Logs/confmap.log`) et ouvre la page. Au premier enregistrement, macOS demande l'autorisation d'utiliser le micro pour le terminal.
 
 1. **● Nouvelle session** : l'enregistrement démarre. Saisir titre et orateur en haut (ils améliorent traduction et carte).
 2. **📱** : QR code à scanner avec l'iPhone → page pour prendre des photos de slides et envoyer des notes.
    Si le wifi de la conférence isole les appareils, connecter le Mac au partage de connexion de l'iPhone.
-3. **⚡** force une mise à jour de la carte ; **⤢** tout voir ; **↻ Tidy** réorganiser ; **📄 Source** ce qui a produit les derniers ajouts. Cliquer un passage de la transcription surligne les boîtes qui en viennent.
+3. **⚡** force une mise à jour de la carte ; **⤢** tout voir ; **↻ Tidy** réorganiser ; **📄 Source** ce qui a produit les derniers ajouts. La transcription est en deux colonnes alignées (original | français) ; survoler un passage surligne sa traduction, le cliquer surligne les boîtes de la carte qui en viennent.
 4. **■ Fin** (deux clics) : re-transcription complète, re-traduction, résumé, écriture dans le vault. La fenêtre peut être fermée pendant ce temps.
 
 Une session interrompue (crash, fermeture) se rouvre depuis l'accueil : **▶ Reprendre** relance l'enregistrement dans un nouveau fichier.
