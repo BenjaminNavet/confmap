@@ -22,8 +22,13 @@
     <span id="costBadge" class="badge" title="Coût équivalent API (payé par l'abonnement)">0,000 $</span>
   </div>
   <button id="forceBtn" class="btn" title="Mettre à jour la carte maintenant">⚡ Mettre à jour</button>
-  <button id="finalsBtn" class="btn" title="État des finalisations">📋</button>
-  <button id="qrBtn" class="btn" title="Page iPhone">📱</button>
+  <div class="more">
+    <button id="moreBtn" class="btn" title="Autres actions" aria-haspopup="true" aria-expanded="false">⋯ Plus</button>
+    <div id="moreMenu" class="more-menu hidden">
+      <button id="finalsBtn" class="btn" title="État des finalisations">📋 Finalisations</button>
+      <button id="qrBtn" class="btn" title="Page iPhone : envoyer des photos de slides">📱 iPhone</button>
+    </div>
+  </div>
   <button id="pauseBtn" class="btn" title="Mettre l'enregistrement en pause / le reprendre">⏸ Pause</button>
   <button id="stopBtn" class="btn btn-danger" title="Terminer et écrire dans Obsidian">■ Fin</button>
 </header>
@@ -35,7 +40,7 @@
       <div id="rows" class="rows"></div>
     </div>
     <div class="resume-bar">
-      <div id="catchup" class="catchup hidden" role="status"><span id="catchupText"></span><button id="catchupClose" aria-label="Fermer" title="Fermer">×</button></div>
+      <div id="catchup" class="catchup hidden" role="status"><span id="catchupText"></span><button id="catchupSee" class="catchup-see hidden" title="Montrer ces nœuds sur la carte">Voir</button><button id="catchupClose" aria-label="Fermer" title="Fermer">×</button></div>
       <button id="jumpBtn" class="jump hidden">↓ Reprendre le direct</button>
     </div>
     <form id="noteForm" class="note-form">
@@ -47,6 +52,7 @@
     <div class="map-tools">
       <button id="fitBtn" class="btn" title="Tout voir et suivre">⤢ Tout voir</button>
       <button id="tidyBtn" class="btn" title="Réorganiser">↻ Réorganiser</button>
+      <button id="unhideBtn" class="btn hidden" title="Réafficher les nœuds masqués">Afficher les masqués (0)</button>
       <button id="sourceBtn" class="btn" title="Contenu à l'origine des derniers ajouts">📄 Source</button>
     </div>
     <div id="sourceBox" class="source-box hidden"></div>

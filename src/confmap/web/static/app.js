@@ -18,6 +18,12 @@ const ui = {
   clock: { ts: 0, wall: 0, recording: false },
   steps: {},
   finalizing: false,
+  paraOf: new Map(), // segment -> clé de son paragraphe (figé une fois affiché)
+  paraT0: new Map(), // clé -> horodatage affiché
+  translationLatencies: [], // secondes, les plus récentes
+  translationSeen: false,
+  netError: false,
+  serverDown: false,
   outputPath: "",
   autoScroll: true,
   map: null,
@@ -40,6 +46,19 @@ function fmtTime(seconds) {
 function toast(text, ms = 3000) {
   const el = $("toast");
   el.textContent = text;
+  el.classList.remove("hidden");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => el.classList.add("hidden"), ms);
+}
+
+function toastAction(text, actionLabel, onAction, ms = 6000) {
+  const el = $("toast");
+  el.textContent = `${text} · `;
+  const button = document.createElement("button");
+  button.className = "toast-action";
+  button.textContent = actionLabel;
+  button.onclick = () => { el.classList.add("hidden"); onAction(); };
+  el.appendChild(button);
   el.classList.remove("hidden");
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => el.classList.add("hidden"), ms);
@@ -128,7 +147,13 @@ function resetView() {
   ui.catchup = null;
   $("catchup").classList.add("hidden");
   setBadge("whisperBadge", "Transcription : en attente", "");
-  setBadge("netBadge", "Traduction/IA : en attente", "");
+  ui.paraOf.clear();
+  ui.paraT0.clear();
+  ui.translationLatencies = [];
+  ui.translationSeen = false;
+  ui.netError = false;
+  updateNetBadge();
+  updateUnhideButton();
   ui.steps = {};
   ui.outputPath = "";
   $("rows").innerHTML = "";
@@ -145,6 +170,7 @@ function connect() {
   socket.onmessage = (message) => {
     if (socket !== ui.socket) return; // ancienne session
     const data = JSON.parse(message.data);
+    ui.serverDown = false;
     if (data.type === "snapshot") {
       resetView();
       const positions = {};
@@ -166,7 +192,8 @@ function connect() {
   socket.onclose = (event) => {
     if (socket !== ui.socket) return;
     if (event.code === 4404) { toast("Session introuvable"); showHome(); return; }
-    setBadge("netBadge", "✗ Serveur injoignable", "bad");
+    ui.serverDown = true;
+    updateNetBadge();
     setTimeout(connect, ui.reconnectDelay);
     ui.reconnectDelay = Math.min(ui.reconnectDelay * 2, 10000);
   };
@@ -215,6 +242,13 @@ function handleEvent(event, replay) {
       break;
     case "translation":
       ui.translations.set(event.segment_id, event.text_fr);
+      ui.translationSeen = true;
+      ui.netError = false;
+      if (!replay && ui.arrivals.has(event.segment_id)) {
+        ui.translationLatencies.push((Date.now() - ui.arrivals.get(event.segment_id)) / 1000);
+        if (ui.translationLatencies.length > 10) ui.translationLatencies.shift();
+      }
+      updateNetBadge();
       if (ui.segments.has(event.segment_id)) scheduleRender();
       break;
     case "note":
@@ -234,12 +268,13 @@ function handleEvent(event, replay) {
       break;
     case "llm_usage":
       ui.cost += event.cost_usd || 0;
-      if (event.ok && $("netBadge").className.indexOf("bad") === -1) setBadge("netBadge", "✓ Traduction/IA", "ok");
       renderCost();
       break;
     case "finalize_step":
       ui.steps[event.step] = event;
-      if (event.output_path) ui.outputPath = event.output_path;
+      if (event.output_path) { ui.outputPath = event.output_path; ui.finalizing = false; }
+      else if (event.state === "running") ui.finalizing = true;
+      updateRecBadge();
       if (!replay) showFinalModal();
       renderFinalSteps();
       break;
@@ -256,10 +291,13 @@ function handleStatus(event, replay) {
     if (event.state === "fallback") { setBadge("whisperBadge", "⚠ Transcription (modèle léger)", "warn"); if (!replay) toast(`Transcription trop lente : ${event.detail}`, 5000); }
     else if (event.state === "error") setBadge("whisperBadge", "✗ Transcription", "bad");
   } else if (event.component === "network") {
-    if (event.state === "down") setBadge("netBadge", `✗ Traduction/IA (${event.pending} en attente)`, "bad");
-    else setBadge("netBadge", "✓ Traduction/IA", "ok");
-  } else if (event.component === "llm" && event.state === "error" && !replay) {
-    toast(event.detail, 5000);
+    ui.netError = event.state === "down";
+    ui.netPending = event.pending || 0;
+    updateNetBadge();
+  } else if (event.component === "llm" && event.state === "error") {
+    ui.netError = true;
+    updateNetBadge();
+    if (!replay) toast(event.detail, 5000);
   }
 }
 
@@ -273,9 +311,31 @@ function renderCost() {
   $("costBadge").textContent = `${ui.cost.toFixed(3).replace(".", ",")} $`;
 }
 
+// Badge de traduction : « en attente » tant que rien n'est arrivé, puis vert dès qu'une traduction
+// arrive, « … » si des segments attendent depuis plus de 10 s, « ⚠ » en erreur.
+function updateNetBadge() {
+  const now = liveClock();
+  let waiting = 0;
+  for (const segment of ui.segments.values()) {
+    if (segment.lang !== "fr" && !ui.translations.has(segment.id) && now - segment.t1 > 10) waiting++;
+  }
+  const latencies = ui.translationLatencies;
+  const average = latencies.length ? latencies.reduce((a, b) => a + b, 0) / latencies.length : null;
+  const latencyText = average === null ? "latence : pas encore mesurée" : `latence moyenne récente : ${average.toFixed(1).replace(".", ",")} s`;
+  const badge = $("netBadge");
+  badge.title = `Traduction et analyse par l'IA (Claude) — ${latencyText}`;
+  if (ui.serverDown) { setBadge("netBadge", "⚠ Serveur injoignable", "bad"); return; }
+  if (ui.netError) { setBadge("netBadge", "⚠ Traduction", "bad"); return; }
+  if (waiting > 0) { setBadge("netBadge", `… Traduction (${waiting} en attente)`, "warn"); return; }
+  if (ui.translationSeen) setBadge("netBadge", "✓ Traduction", "ok");
+  else setBadge("netBadge", "Traduction : en attente", "");
+}
+
 function updateRecBadge() {
   const now = ui.clock.recording ? ui.clock.ts + (Date.now() / 1000 - ui.clock.wall) : ui.clock.ts;
-  if (ui.clock.recording) setBadge("recBadge", `REC ${fmtTime(now)}`, "rec");
+  if (ui.finalizing && !ui.outputPath) setBadge("recBadge", "Finalisation…", "warn pulse");
+  else if (ui.outputPath && !ui.clock.recording) setBadge("recBadge", "✓ Terminée", "ok");
+  else if (ui.clock.recording) setBadge("recBadge", `REC ${fmtTime(now)}`, "rec");
   else setBadge("recBadge", `⏸ Pause ${fmtTime(now)}`, "warn pulse");
 }
 
@@ -311,6 +371,7 @@ function scheduleRender() {
 function buildParagraphs() {
   const entries = [...ui.items.entries()].sort((a, b) => a[1].ts - b[1].ts);
   const rows = [];
+  const byKey = new Map();
   let paragraph = null;
   for (const [id, entry] of entries) {
     if (entry.kind === "item") {
@@ -319,12 +380,25 @@ function buildParagraphs() {
       continue;
     }
     const segment = entry.segment;
-    const startsNew = !paragraph
-      || segment.t0 - paragraph.t1 > PARAGRAPH_GAP
-      || segment.t1 - paragraph.t0 > PARAGRAPH_MAX;
-    if (startsNew) {
-      paragraph = { type: "para", t0: segment.t0, t1: segment.t1, segments: [] };
+    // Un segment déjà rangé garde son paragraphe et son horodatage : rien ne fusionne sous l'œil.
+    const knownKey = ui.paraOf.get(id);
+    if (knownKey !== undefined && byKey.has(knownKey)) {
+      paragraph = byKey.get(knownKey);
+    } else if (knownKey !== undefined) {
+      paragraph = { type: "para", key: knownKey, t0: ui.paraT0.get(knownKey), t1: segment.t1, segments: [] };
+      byKey.set(knownKey, paragraph);
       rows.push(paragraph);
+    } else {
+      const startsNew = !paragraph
+        || segment.t0 - paragraph.t1 > PARAGRAPH_GAP
+        || segment.t1 - paragraph.t0 > PARAGRAPH_MAX;
+      if (startsNew) {
+        paragraph = { type: "para", key: id, t0: segment.t0, t1: segment.t1, segments: [] };
+        ui.paraT0.set(id, segment.t0);
+        byKey.set(id, paragraph);
+        rows.push(paragraph);
+      }
+      ui.paraOf.set(id, paragraph.key);
     }
     paragraph.segments.push(segment);
     paragraph.t1 = Math.max(paragraph.t1, segment.t1);
@@ -396,11 +470,18 @@ function showCatchup() {
   const mapInfo = map && typeof map.markSince === "function" ? (map.markSince(since) || {}) : {};
   const nodes = mapInfo.count || 0;
   if (!paragraphs.length && !nodes) return;
-  const parts = [`${paragraphs.length} passage${paragraphs.length > 1 ? "s" : ""}`];
+  const parts = [];
+  if (paragraphs.length) parts.push(`${paragraphs.length} passage${paragraphs.length > 1 ? "s" : ""}`);
   if (nodes) parts.push(`${nodes} nœud${nodes > 1 ? "s" : ""}`);
   const topics = [].concat(mapInfo.topics || []).filter(Boolean);
   const subject = topics.length ? ` — sujet : ${topics.slice(0, 2).join(", ")}` : "";
-  $("catchupText").textContent = `Pendant votre absence (${fmtDuration(seconds)}) : ${parts.join(", ")}${subject}`;
+  const labels = [].concat(mapInfo.labels || []).filter(Boolean).slice(0, 3);
+  const labelText = labels.length ? ` (${labels.map((label) => `« ${label} »`).join(", ")})` : "";
+  const ids = [].concat(mapInfo.ids || []);
+  $("catchupText").textContent = `Pendant votre absence (${fmtDuration(seconds)}) : ${parts.join(", ")}${labelText}${subject}`;
+  const see = $("catchupSee");
+  see.classList.toggle("hidden", !ids.length || typeof map.focusNodes !== "function");
+  see.onclick = () => map.focusNodes(ids);
   $("catchup").classList.remove("hidden");
   ui.catchup = { since, until: Date.now() + 8000 };
   clearTimeout(ui.catchupTimer);
@@ -441,6 +522,12 @@ function renderMini(markdown) {
 
 // ---------- carte ----------
 
+function updateUnhideButton() {
+  const count = ui.map && typeof ui.map.hiddenNodeIds === "function" ? ui.map.hiddenNodeIds().length : 0;
+  $("unhideBtn").classList.toggle("hidden", count === 0);
+  $("unhideBtn").textContent = `Afficher les masqués (${count})`;
+}
+
 function renderMap(event, replay) {
   $("mapEmpty").classList.toggle("hidden", (event.topics || []).length > 0);
   ui.map.render(event.topics || [], replay ? [] : event.added_node_ids || [], event.source_text || "");
@@ -468,6 +555,9 @@ function renderFinalSteps() {
   // Interrompue (serveur relancé) : aucune tâche ne tourne, il faut pouvoir reprendre.
   const interrupted = !ui.finalizing && !ui.outputPath && Object.keys(ui.steps).length > 0;
   $("retryFinalBtn").classList.toggle("hidden", !failed && !interrupted);
+  const busy = ui.finalizing && !ui.outputPath && !failed;
+  $("finalNewBtn").disabled = busy;
+  $("finalNewBtn").title = busy ? "Disponible à la fin de la finalisation" : "";
   const result = $("finalResult");
   if (ui.outputPath) {
     const noteName = ui.outputPath.split("/").pop().replace(/\.md$/, "");
@@ -514,6 +604,9 @@ async function onStop() {
   button.textContent = "…";
   try {
     await api(`/api/sessions/${ui.sessionId}/stop`, { method: "POST" });
+    ui.finalizing = true;
+    ui.clock.recording = false;
+    updateRecBadge();
     showFinalModal();
   } catch (error) {
     toast(error.message, 5000);
@@ -617,6 +710,10 @@ async function sendNote() {
 
 function init() {
   ui.map = new IdeaMap($("map"), {
+    onHide: (id, label) => {
+      updateUnhideButton();
+      toastAction(`« ${label} » masqué`, "Annuler", () => { ui.map.unhideNode(id); updateUnhideButton(); }, 6000);
+    },
     onPositions: (positions) => {
       if (!ui.sessionId) return;
       api(`/api/sessions/${ui.sessionId}/map/positions`, { method: "POST", body: JSON.stringify({ positions }) }).catch(() => {});
@@ -634,6 +731,7 @@ function init() {
   $("noteForm").onsubmit = (event) => { event.preventDefault(); sendNote(); };
   $("forceBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/map/force`, { method: "POST" }).then(() => toast("Mise à jour de la carte demandée", 1500)).catch((e) => toast(e.message));
   $("fitBtn").onclick = () => { ui.map.fit(true); toast("Vue d'ensemble — le suivi reprend à la prochaine mise à jour", 2000); };
+  $("unhideBtn").onclick = () => { if (typeof ui.map.unhideAll === "function") ui.map.unhideAll(); updateUnhideButton(); };
   $("tidyBtn").onclick = () => ui.map.tidy();
   $("sourceBtn").onclick = () => {
     const box = $("sourceBox");
@@ -647,6 +745,14 @@ function init() {
     $("captureLink").textContent = info.capture_url;
     $("qrModal").classList.remove("hidden");
   };
+  const closeMore = () => { $("moreMenu").classList.add("hidden"); $("moreBtn").setAttribute("aria-expanded", "false"); };
+  $("moreBtn").onclick = (event) => {
+    event.stopPropagation();
+    const open = $("moreMenu").classList.toggle("hidden") === false;
+    $("moreBtn").setAttribute("aria-expanded", String(open));
+  };
+  $("moreMenu").addEventListener("click", closeMore);
+  document.addEventListener("click", closeMore);
   $("stopBtn").onclick = onStop;
   $("finalsBtn").onclick = showFinalizations;
   $("homeFinalsBtn").onclick = showFinalizations;
@@ -692,6 +798,8 @@ function init() {
   });
   setInterval(() => {
     updateRecBadge();
+    updateNetBadge();
+    updateUnhideButton();
     if (ui.clock.recording && document.querySelector(".s.pending")) scheduleRender();
   }, 1000);
   if (ui.sessionId) openSession(ui.sessionId);
