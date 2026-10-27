@@ -195,7 +195,9 @@ def _flatten_markdown(text: str) -> str:
     lines = []
     for line in text.strip().splitlines():
         heading = re.match(r"^\s*#{1,6}\s+(.*)$", line)
-        lines.append(f"**{heading.group(1).strip('* ')}**" if heading else line.rstrip())
+        lines.append(
+            f"**{heading.group(1).strip('* ')}**" if heading else line.rstrip()
+        )
     return "\n".join(lines)
 
 

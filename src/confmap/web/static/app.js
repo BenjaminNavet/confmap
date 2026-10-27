@@ -189,6 +189,7 @@ function handleEvent(event, replay) {
       break;
     case "llm_usage":
       ui.cost += event.cost_usd || 0;
+      if (event.ok && $("netBadge").className.indexOf("bad") === -1) setBadge("netBadge", "Réseau ✓", "ok");
       $("costBadge").textContent = `${ui.cost.toFixed(3).replace(".", ",")} $`;
       break;
     case "finalize_step":
@@ -383,7 +384,7 @@ function init() {
   });
   $("noteForm").onsubmit = (event) => { event.preventDefault(); sendNote(); };
   $("forceBtn").onclick = () => api(`/api/sessions/${ui.sessionId}/map/force`, { method: "POST" }).then(() => toast("Mise à jour de la carte demandée", 1500)).catch((e) => toast(e.message));
-  $("fitBtn").onclick = () => ui.map.fit(true);
+  $("fitBtn").onclick = () => { ui.map.fit(true); toast("Vue d'ensemble — le suivi reprend à la prochaine mise à jour", 2000); };
   $("tidyBtn").onclick = () => ui.map.tidy();
   $("sourceBtn").onclick = () => {
     const box = $("sourceBox");

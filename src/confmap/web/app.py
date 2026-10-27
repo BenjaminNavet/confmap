@@ -205,7 +205,15 @@ class SameOriginMiddleware:
 
 def create_app(services: AppServices) -> FastAPI:
     """Construit l'application web."""
-    app = FastAPI(title="confmap")
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        yield
+        for runtime in services.runtimes.values():
+            with contextlib.suppress(Exception):
+                await runtime.shutdown()
+
+    app = FastAPI(title="confmap", lifespan=lifespan)
     app.state.services = services
     app.add_middleware(SameOriginMiddleware, port=services.settings.server.port)
 
@@ -410,12 +418,6 @@ def create_app(services: AppServices) -> FastAPI:
             runtime.session.bus.unsubscribe(queue)
             with contextlib.suppress(Exception):
                 receiver.cancel()
-
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
-        for runtime in services.runtimes.values():
-            with contextlib.suppress(Exception):
-                await runtime.shutdown()
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

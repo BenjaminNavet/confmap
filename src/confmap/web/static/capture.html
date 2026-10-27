@@ -106,7 +106,8 @@ function render(items) {
     const label = item.kind === "note" ? "📝 note envoyée ✓"
       : item.status === "done" ? "📷 analysée ✓" : item.status === "error" ? "📷 erreur" : item.status === "upload" ? "📷 envoi…" : "📷 envoyée, analyse…";
     const cls = item.status === "done" ? "ok" : item.status === "error" ? "bad" : "";
-    return `<li><div class="state ${cls}">${label}</div>${esc(item.text)}</li>`;
+    const text = esc(item.text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    return `<li><div class="state ${cls}">${label}</div>${text}</li>`;
   }).join("");
 }
 

@@ -28,8 +28,7 @@ class IdeaMap {
     this.positionTimer = null;
     this.cy = cytoscape({
       container,
-      wheelSensitivity: 0.25,
-      minZoom: 0.15,
+            minZoom: 0.15,
       maxZoom: 2.5,
       style: this.styles(),
       elements: [],
@@ -145,7 +144,7 @@ class IdeaMap {
       fresh.addClass("fresh");
       setTimeout(() => fresh.removeClass("fresh"), FRESH_MS);
     }
-    if (this.follow) this.fit(false);
+    if (this.follow) this.followLatest();
     return changed.length;
   }
 
@@ -221,6 +220,18 @@ class IdeaMap {
     this.savedPositions = {};
     this.layoutTopics(this.topics.map((t) => t.id), true);
     this.fit(true);
+  }
+
+  followLatest() {
+    // Suivi du direct : cadre les deux derniers sujets pour garder un texte lisible.
+    const recent = this.topics.slice(-2).map((t) => this.cy.getElementById(t.id)).filter((e) => e.nonempty());
+    if (!recent.length) return;
+    let eles = this.cy.collection();
+    for (const topic of recent) eles = eles.union(topic).union(topic.descendants()).union(topic.descendants().connectedEdges());
+    this.programmatic = true;
+    this.cy.fit(eles, 40);
+    if (this.cy.zoom() > 1.3) this.cy.zoom({ level: 1.3, renderedPosition: { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 } });
+    this.programmatic = false;
   }
 
   fit(animate) {

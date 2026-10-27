@@ -52,14 +52,8 @@ class MicrophoneSource:
                 log.debug("statut micro : %s", status)
             loop.call_soon_threadsafe(queue.put_nowait, indata[:, 0].copy())
 
-        stream = sounddevice.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype="float32",
-            blocksize=BLOCK_SIZE,
-            device=self.device,
-            callback=callback,
-        )
+        stream, input_rate = open_input_stream(sounddevice, self.device, callback)
+        rechunker = Rechunker(input_rate)
         with stream:
             while not self._stopped.is_set():
                 getter = asyncio.ensure_future(queue.get())
@@ -69,13 +63,77 @@ class MicrophoneSource:
                 )
                 if getter in done:
                     stopper.cancel()
-                    yield getter.result()
+                    for block in rechunker.push(getter.result()):
+                        yield block
                 else:
                     getter.cancel()
 
     def stop(self) -> None:
         """Arrête la capture."""
         self._stopped.set()
+
+
+def open_input_stream(sounddevice_module, device, callback):
+    """Ouvre le micro en 16 kHz, ou à son taux natif si le pilote refuse."""
+    try:
+        stream = sounddevice_module.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+            blocksize=BLOCK_SIZE,
+            device=device,
+            callback=callback,
+        )
+        return stream, SAMPLE_RATE
+    except sounddevice_module.PortAudioError:
+        native_rate = int(
+            sounddevice_module.query_devices(device, kind="input")["default_samplerate"]
+        )
+        log.info("micro ouvert à %d Hz, rééchantillonné en 16 kHz", native_rate)
+        stream = sounddevice_module.InputStream(
+            samplerate=native_rate,
+            channels=1,
+            dtype="float32",
+            blocksize=int(native_rate * BLOCK_SIZE / SAMPLE_RATE),
+            device=device,
+            callback=callback,
+        )
+        return stream, native_rate
+
+
+class Rechunker:
+    """Rééchantillonne en 16 kHz (interpolation linéaire) et redécoupe en blocs de 512."""
+
+    def __init__(self, input_rate: int) -> None:
+        """Prépare la conversion depuis `input_rate`."""
+        self.input_rate = input_rate
+        self._pending = np.zeros(0, dtype=np.float32)
+        self._phase = (
+            0.0  # position (en échantillons d'entrée) du prochain échantillon de sortie
+        )
+        self._previous = np.zeros(0, dtype=np.float32)
+
+    def push(self, samples: np.ndarray) -> list[np.ndarray]:
+        """Ajoute des échantillons ; retourne les blocs complets disponibles."""
+        if self.input_rate != SAMPLE_RATE:
+            samples = self._resample(samples.astype(np.float32))
+        self._pending = np.concatenate([self._pending, samples.astype(np.float32)])
+        blocks = []
+        while len(self._pending) >= BLOCK_SIZE:
+            blocks.append(self._pending[:BLOCK_SIZE])
+            self._pending = self._pending[BLOCK_SIZE:]
+        return blocks
+
+    def _resample(self, samples: np.ndarray) -> np.ndarray:
+        source = np.concatenate([self._previous, samples])
+        step = self.input_rate / SAMPLE_RATE
+        positions = np.arange(self._phase, len(source) - 1, step)
+        output = np.interp(positions, np.arange(len(source)), source).astype(np.float32)
+        next_position = self._phase + len(positions) * step
+        keep_from = int(np.floor(next_position))
+        self._previous = source[keep_from:]
+        self._phase = next_position - keep_from
+        return output
 
 
 class FileSource:

@@ -19,7 +19,8 @@ Aucune solution existante ne couvre l'ensemble (recherche du 2026-10-27). La log
 | Source audio | Micro du MacBook, orateur sur les enceintes de la salle |
 | Traitement | Hybride : transcription locale, traduction/carte/vision/résumé via Claude |
 | Transcription | `mlx-whisper` (`large-v3-turbo` en direct, `large-v3` en finalisation), langue détectée automatiquement |
-| LLM | `claude-haiku-5-5` pour la traduction en direct ; `claude-sonnet-5-5` pour la carte, la vision, la re-traduction finale et le résumé. Les deux sont configurables |
+| LLM | `claude-haiku-5-5` pour la traduction en direct ; `claude-sonnet-5-5` pour la carte, la vision, la re-traduction finale et le résumé. Les deux sont configurables. Appels via la CLI Claude Code (abonnement), voir ADR 0001 |
+| Coût | Coût équivalent API de chaque appel (`total_cost_usd` de la CLI) cumulé et affiché en direct dans la barre du haut |
 | Photos | Prises sur iPhone via une page web servie par le Mac ; seul le texte extrait est conservé, jamais l'image |
 | Affichage transcription | Original (petit, grisé) + traduction française, phrase par phrase |
 | Diagramme dans Obsidian | `.canvas` détaillé + Mermaid simplifié dans la note |
@@ -156,7 +157,7 @@ sessions = "~/dev/confmap/sessions"
 [server]
 port = 8010
 ```
-La clé `ANTHROPIC_API_KEY` est lue depuis l'environnement ou `.env`.
+Pas de clé API : la CLI `claude` doit être installée et connectée (ADR 0001).
 
 ## 10. Lots de développement
 

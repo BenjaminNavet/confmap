@@ -1,9 +1,13 @@
 # confmap — suivi
 
-**État** (2026-10-27) : tous les modules écrits (audio, VAD Silero ONNX, mlx-whisper, LLM via CLI Claude Code, traduction, carte, vision, finalisation, vault, web Mac + iPhone). Tests unitaires en cours d'écriture (agent). E2E réel sur audio TTS en cours.
+**État** (2026-10-27) : v1 terminée et testée.
+- 115 tests unitaires/intégration (fakes, sans réseau ni micro).
+- E2E réel : audio → Whisper → Claude CLI → carte → note + canvas (EN), détection/traduction ES vérifiée.
+- UI headless (Playwright) : session, contexte, note, photo via page iPhone, finalisation, rechargement.
+- Robustesse : kill -9 en pleine session → reprise → 2e fichier audio → finalisation OK. Origine/Host vérifiés (403 pour un autre site).
 
-**Prochaine étape** : résultats e2e → corrections ; test UI headless (playwright, `scratchpad/ui/ui_test.py`) ; recette robustesse (réseau coupé, reprise).
+**Mesures** : retard du direct ~5–9 s ; coût équivalent ≈ 3 $/h (85 % carte Sonnet toutes les 20 s, réglable).
 
-**Points ouverts**
-- Latence réelle du direct à mesurer sur micro.
-- Coût d'un appel CLI ≈ 1-2 s de démarrage : traduction par lots de 8 segments max.
+**Non testé en conditions réelles** : micro du MacBook en salle (autorisation micro macOS à accorder au terminal au premier lancement), iPhone réel sur le wifi d'une conférence, coupure réseau réelle (couverte seulement par tests avec faux client).
+
+**Pistes v2** : intervalle de carte adaptatif pour réduire le coût, édition des nœuds dans l'UI, export PDF.

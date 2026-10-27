@@ -84,3 +84,34 @@ def test_flush_emits_trailing_segment():
 )
 def test_is_hallucination(text, expected):
     assert is_hallucination(text) is expected
+
+
+def test_rechunker_resamples_48k_to_16k_blocks():
+    import numpy as np
+
+    from confmap.audio import BLOCK_SIZE, Rechunker
+
+    rechunker = Rechunker(48_000)
+    t = np.arange(48_000 * 2) / 48_000
+    tone = np.sin(2 * np.pi * 440 * t).astype(np.float32)
+    blocks = []
+    for start in range(0, len(tone), 1536):  # blocs irréguliers de 32 ms
+        blocks += rechunker.push(tone[start : start + 1536])
+    total = sum(len(b) for b in blocks)
+    assert all(len(b) == BLOCK_SIZE for b in blocks)
+    assert abs(total - 32_000) <= BLOCK_SIZE  # 2 s à 16 kHz
+    out = np.concatenate(blocks)
+    expected = np.sin(2 * np.pi * 440 * np.arange(len(out)) / 16_000)
+    assert np.max(np.abs(out - expected)) < 0.05
+
+
+def test_rechunker_passthrough_16k():
+    import numpy as np
+
+    from confmap.audio import Rechunker
+
+    rechunker = Rechunker(16_000)
+    assert [len(b) for b in rechunker.push(np.ones(1100, dtype=np.float32))] == [
+        512,
+        512,
+    ]
