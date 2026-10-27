@@ -125,6 +125,7 @@ function resetView() {
   $("rows").innerHTML = "";
   ui.map.cy.elements().remove();
   ui.map.signatures.clear();
+  ui.map.placed.clear();
 }
 
 function connect() {
@@ -323,7 +324,10 @@ function buildParagraphs() {
 function renderTranscript() {
   const rows = buildParagraphs();
   const languages = {};
-  const html = rows.map((row) => {
+  // Le dernier paragraphe parlé est mis en avant, les précédents sont atténués.
+  let currentIndex = -1;
+  rows.forEach((row, index) => { if (row.type !== "item") currentIndex = index; });
+  const html = rows.map((row, index) => {
     if (row.type === "item") {
       return `<div class="row-item ${row.entry.className}" data-id="${row.id}">${row.entry.html}</div>`;
     }
@@ -337,7 +341,8 @@ function renderTranscript() {
       french += `<span class="s${pending}" data-id="${segment.id}">${escapeHtml(text)}</span> `;
     }
     const time = `<span class="time">${fmtTime(row.t0)}</span>`;
-    return `<div class="cell orig">${time}${original}</div><div class="cell fr">${original ? "" : time}${french}</div>`;
+    const current = index === currentIndex ? " current" : "";
+    return `<div class="cell orig${current}">${time}${original}</div><div class="cell fr${current}">${original ? "" : time}${french}</div>`;
   }).join("");
   $("rows").innerHTML = html;
   const dominant = Object.entries(languages).sort((a, b) => b[1] - a[1])[0];

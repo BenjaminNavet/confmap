@@ -34,5 +34,6 @@ Ne modifie aucun fichier du dépôt hors `.judge/iter-N/`.
 4. Les 5 corrections au meilleur rapport effet/effort.
 
 Pas de compliments inutiles. Distingue ce que tu as observé de ce que tu supposes.
+L'interface est volontairement en thème sombre uniquement (usage en salle) : ne pas pénaliser l'absence de thème clair.
 Le rendu `canvas.png` est approché (fait par le banc) : juge la disposition et le contenu, pas son style.
 Réponse finale : le score total et les 5 corrections prioritaires, rien d'autre.

@@ -105,7 +105,7 @@ def capture_ui(out: Path) -> None:
         page.wait_for_timeout(800)
         page.screenshot(path=shots / f"{index + 1:02d}-source.png")
         page.click("#sourceBtn")
-        first_row = page.locator("#rows > *").first
+        first_row = page.locator("#rows .cell.fr .s").nth(2)
         if first_row.count():
             first_row.click()
             page.wait_for_timeout(800)

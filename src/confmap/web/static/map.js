@@ -1,5 +1,6 @@
 // Carte des idées : un groupe par sujet, posés de gauche à droite.
-// Les sujets terminés ne bougent plus ; seuls les sujets modifiés sont réorganisés.
+// Stabilité : un nœud déjà affiché ne bouge plus ; seuls les nouveaux sont placés
+// (près de leurs voisins, sans chevauchement). Seul « Tidy » réorganise tout.
 "use strict";
 
 const KIND_INFO = {
@@ -10,6 +11,9 @@ const KIND_INFO = {
 };
 const TOPIC_GAP = 140;
 const FRESH_MS = 4000;
+const NODE_MARGIN = 18;
+// Zoom minimal en suivi du direct : le texte des nœuds reste à ~14 px à l'écran.
+const MIN_FOLLOW_ZOOM = 0.95;
 
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888";
@@ -26,6 +30,7 @@ class IdeaMap {
     this.savedPositions = {};
     this.lastSource = "";
     this.positionTimer = null;
+    this.placed = new Set(); // nœuds déjà positionnés à l'écran (ne bougent plus)
     this.cy = cytoscape({
       container,
             minZoom: 0.15,
@@ -67,9 +72,9 @@ class IdeaMap {
           "border-width": 1.5,
           label: "data(label)",
           "text-wrap": "wrap",
-          "text-max-width": 150,
+          "text-max-width": 180,
           "text-valign": "center",
-          "font-size": 13,
+          "font-size": 15,
           color: cssVar("--text"),
           width: "data(w)",
           height: "data(h)",
@@ -84,24 +89,25 @@ class IdeaMap {
           "line-color": cssVar("--faint"),
           "target-arrow-color": cssVar("--faint"),
           label: "data(label)",
-          "font-size": 11,
+          "font-size": 13,
           color: cssVar("--muted"),
           "text-background-color": cssVar("--bg"),
           "text-background-opacity": 0.9,
-          "text-background-padding": 2,
-          "text-rotation": "autorotate",
+          "text-background-padding": 3,
+          "text-wrap": "wrap",
+          "text-max-width": 140,
         },
       },
       { selector: "node.idea.fresh", style: { "underlay-color": cssVar("--fresh-glow"), "underlay-opacity": 0.55, "underlay-padding": 8 } },
-      { selector: "node.idea.highlight", style: { "border-width": 3 } },
+      { selector: "node.idea.highlight", style: { "border-width": 4, "border-color": cssVar("--accent"), "underlay-color": cssVar("--accent"), "underlay-opacity": 0.45, "underlay-padding": 10 } },
     ];
   }
 
   nodeSize(text) {
     const length = text.length;
-    const width = Math.max(80, Math.min(170, 22 + length * 7.2));
-    const lines = Math.ceil((length * 7.2) / 150);
-    return { w: width, h: 30 + Math.max(0, lines - 1) * 16 };
+    const width = Math.max(90, Math.min(205, 26 + length * 8.3));
+    const lines = Math.ceil((length * 8.3) / 180);
+    return { w: width, h: 34 + Math.max(0, lines - 1) * 19 };
   }
 
   setSavedPositions(positions) {
@@ -113,6 +119,7 @@ class IdeaMap {
     if (sourceText) this.lastSource = sourceText;
     const cy = this.cy;
     const changed = [];
+    this.newIds = new Set();
     cy.batch(() => {
       for (const topic of this.topics) {
         const signature = JSON.stringify([topic.title, topic.nodes.map((n) => n.id), topic.edges.map((e) => e.from + ">" + e.to)]);
@@ -129,6 +136,7 @@ class IdeaMap {
           if (!cy.getElementById(node.id).empty()) continue;
           const label = `${node.emoji ? node.emoji + " " : ""}${node.label}`;
           cy.add({ group: "nodes", data: { id: node.id, parent: topic.id, label, kind: topic.kind, sources: node.sources || [], ...this.nodeSize(label) }, classes: "idea" });
+          this.newIds.add(node.id);
         }
         for (const edge of topic.edges) {
           const id = `${edge.from}->${edge.to}`;
@@ -144,7 +152,7 @@ class IdeaMap {
       fresh.addClass("fresh");
       setTimeout(() => fresh.removeClass("fresh"), FRESH_MS);
     }
-    if (this.follow) this.followLatest();
+    if (this.follow) this.followLatest(fresh);
     return changed.length;
   }
 
@@ -161,20 +169,40 @@ class IdeaMap {
       if (!topicIds.includes(topic.id)) return;
       const kids = cy.getElementById(topic.id).children();
       if (kids.empty()) return;
-      const allSaved = !force && kids.every((k) => this.savedPositions[k.id()]);
-      if (allSaved) {
-        kids.forEach((k) => { const [x, y] = this.savedPositions[k.id()]; k.position({ x, y }); });
-        return;
+      // Positions à conserver : nœuds déjà à l'écran, ou positions enregistrées (rechargement).
+      const kept = new Map();
+      if (!force) {
+        kids.forEach((k) => {
+          if (this.placed.has(k.id())) kept.set(k.id(), { ...k.position() });
+          else if (this.savedPositions[k.id()]) { const [x, y] = this.savedPositions[k.id()]; kept.set(k.id(), { x, y }); }
+        });
       }
-      if (topic.kind === "concept") this.layoutConcept(kids);
-      else kids.union(kids.connectedEdges()).layout({ ...(KIND_INFO[topic.kind] || KIND_INFO.process).layout, fit: false, animate: false }).run();
-      // Place le sujet à droite du précédent, en haut.
-      const box = kids.boundingBox();
-      const dx = this.topicAnchorX(index) - box.x1;
-      const dy = 0 - box.y1;
-      kids.positions((k) => ({ x: k.position("x") + dx, y: k.position("y") + dy }));
+      if (kept.size === kids.length) {
+        kids.forEach((k) => k.position(kept.get(k.id())));
+      } else {
+        this.runTopicLayout(topic, kids);
+        if (kept.size === 0) {
+          // Nouveau sujet : à droite du précédent, en haut.
+          const box = kids.boundingBox();
+          const dx = this.topicAnchorX(index) - box.x1;
+          const dy = 0 - box.y1;
+          kids.positions((k) => ({ x: k.position("x") + dx, y: k.position("y") + dy }));
+        } else {
+          // Sujet qui grandit : on aligne la nouvelle disposition sur l'ancienne,
+          // les anciens nœuds reprennent leur place, seuls les nouveaux arrivent.
+          let dx = 0, dy = 0;
+          kept.forEach((old, id) => { const now = cy.getElementById(id).position(); dx += old.x - now.x; dy += old.y - now.y; });
+          dx /= kept.size; dy /= kept.size;
+          kids.forEach((k) => {
+            k.position(kept.has(k.id()) ? kept.get(k.id()) : { x: k.position("x") + dx, y: k.position("y") + dy });
+          });
+        }
+        const movable = kids.filter((k) => !kept.has(k.id()));
+        this.resolveCollisions(movable);
+      }
+      kids.forEach((k) => this.placed.add(k.id()));
     });
-    // Les sujets suivants (rares : réorganisation) sont décalés pour ne pas se chevaucher.
+    // Un sujet qui a grandi ne doit pas recouvrir le suivant : on décale les suivants.
     this.topics.forEach((topic, index) => {
       if (index === 0) return;
       const kids = cy.getElementById(topic.id).children();
@@ -184,6 +212,32 @@ class IdeaMap {
       if (box.x1 < minX) kids.positions((k) => ({ x: k.position("x") + (minX - box.x1), y: k.position("y") }));
     });
     this.reportPositions();
+  }
+
+  runTopicLayout(topic, kids) {
+    if (topic.kind === "concept") this.layoutConcept(kids);
+    else kids.union(kids.connectedEdges()).layout({ ...(KIND_INFO[topic.kind] || KIND_INFO.process).layout, fit: false, animate: false }).run();
+  }
+
+  // Pousse vers le bas les nœuds `movable` qui chevauchent un autre nœud (marge comprise).
+  resolveCollisions(movable) {
+    const others = this.cy.nodes(".idea");
+    const box = (n) => {
+      const p = n.position(), w = n.data("w") / 2 + NODE_MARGIN / 2, h = n.data("h") / 2 + NODE_MARGIN / 2;
+      return { x1: p.x - w, x2: p.x + w, y1: p.y - h, y2: p.y + h };
+    };
+    movable.forEach((node) => {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const a = box(node);
+        const hit = others.filter((o) => {
+          if (o.same(node)) return false;
+          const b = box(o);
+          return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+        })[0];
+        if (!hit) break;
+        node.position({ x: node.position("x"), y: box(hit).y2 + node.data("h") / 2 + NODE_MARGIN / 2 + 1 });
+      }
+    });
   }
 
   layoutConcept(kids) {
@@ -218,19 +272,24 @@ class IdeaMap {
 
   tidy() {
     this.savedPositions = {};
+    this.placed.clear();
     this.layoutTopics(this.topics.map((t) => t.id), true);
     this.fit(true);
   }
 
-  followLatest() {
-    // Suivi du direct : cadre les deux derniers sujets pour garder un texte lisible.
-    const recent = this.topics.slice(-2).map((t) => this.cy.getElementById(t.id)).filter((e) => e.nonempty());
-    if (!recent.length) return;
-    let eles = this.cy.collection();
-    for (const topic of recent) eles = eles.union(topic).union(topic.descendants()).union(topic.descendants().connectedEdges());
+  followLatest(fresh) {
+    // Suivi du direct : zoom stable (texte lisible), on ne fait que recentrer
+    // quand les derniers ajouts sortent du cadre.
+    const cy = this.cy;
+    const last = this.topics.length ? cy.getElementById(this.topics[this.topics.length - 1].id) : null;
+    const target = fresh && fresh.nonempty() ? fresh : last && last.nonempty() ? last.descendants() : null;
+    if (!target || target.empty()) return;
     this.programmatic = true;
-    this.cy.fit(eles, 40);
-    if (this.cy.zoom() > 1.3) this.cy.zoom({ level: 1.3, renderedPosition: { x: this.container.clientWidth / 2, y: this.container.clientHeight / 2 } });
+    const zoom = Math.min(1.3, Math.max(MIN_FOLLOW_ZOOM, cy.zoom()));
+    if (zoom !== cy.zoom()) cy.zoom(zoom);
+    const box = target.boundingBox(), view = cy.extent();
+    const inside = box.x1 >= view.x1 && box.x2 <= view.x2 && box.y1 >= view.y1 && box.y2 <= view.y2;
+    if (!inside) cy.center(target);
     this.programmatic = false;
   }
 
