@@ -34,8 +34,8 @@ from confmap.map_updater import ContentItem, request_update
 from confmap.segmenter import Segmenter, SpeechDetector, SpeechSegment
 from confmap.session_store import SessionLog
 from confmap.transcriber import (
-    MlxWhisperTranscriber,
     Transcriber,
+    WhisperTranscriber,
     build_initial_prompt,
     is_hallucination,
 )
@@ -347,7 +347,7 @@ class SessionRuntime:
 
     def _refresh_whisper_prompt(self) -> None:
         """Amorce Whisper (direct) avec titre, orateur, slides et notes."""
-        if isinstance(self.transcriber, MlxWhisperTranscriber):
+        if isinstance(self.transcriber, WhisperTranscriber):
             self.transcriber.initial_prompt = build_initial_prompt(
                 self.state.title, self.state.speaker, self.state.reference_text()
             )
@@ -493,7 +493,7 @@ class SessionRuntime:
                 slow_streak = slow_streak + 1 if lag > MAX_LAG_SECONDS else 0
                 if (
                     slow_streak >= 3
-                    and isinstance(self.transcriber, MlxWhisperTranscriber)
+                    and isinstance(self.transcriber, WhisperTranscriber)
                     and self.transcriber.use_fallback()
                 ):
                     self._status(

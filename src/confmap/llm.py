@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import shutil
 import tempfile
 from dataclasses import dataclass, field
@@ -92,9 +93,17 @@ class ClaudeCliClient:
         self._workdir = tempfile.mkdtemp(prefix="confmap-llm-")
 
     def build_args(
-        self, model: str, system: str, schema: dict[str, Any] | None, with_images: bool
+        self,
+        model: str,
+        system_file: str,
+        schema: dict[str, Any] | None,
+        with_images: bool,
     ) -> list[str]:
-        """Arguments de la ligne de commande pour un appel."""
+        """Arguments de la ligne de commande pour un appel.
+
+        Le prompt système passe par un fichier : sous Windows, une longue chaîne
+        multiligne sur la ligne de commande est tronquée ou mal découpée.
+        """
         args = [
             self.executable,
             "-p",
@@ -109,8 +118,8 @@ class ClaudeCliClient:
             "",
             "--strict-mcp-config",
             "--disable-slash-commands",
-            "--system-prompt",
-            system,
+            "--system-prompt-file",
+            system_file,
         ]
         if schema is not None:
             args += ["--json-schema", json.dumps(schema, ensure_ascii=False)]
@@ -148,7 +157,24 @@ class ClaudeCliClient:
         timeout: float = 60.0,
     ) -> LlmResult:
         """Lance `claude -p` et interprète sa sortie JSON."""
-        args = self.build_args(model, system, schema, bool(images))
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", suffix=".txt", dir=self._workdir, delete=False
+        ) as system_file:
+            system_file.write(system)
+        try:
+            args = self.build_args(model, system_file.name, schema, bool(images))
+            return await self._run(args, prompt, images, schema is not None, timeout)
+        finally:
+            os.unlink(system_file.name)
+
+    async def _run(
+        self,
+        args: list[str],
+        prompt: str,
+        images: list[ImageInput] | None,
+        expect_json: bool,
+        timeout: float,
+    ) -> LlmResult:
         try:
             process = await asyncio.create_subprocess_exec(
                 *args,
@@ -170,7 +196,7 @@ class ClaudeCliClient:
         return parse_cli_output(
             stdout.decode("utf-8", "replace"),
             stderr.decode("utf-8", "replace"),
-            schema is not None,
+            expect_json,
         )
 
 

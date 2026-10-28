@@ -5,9 +5,15 @@ translate = "claude-haiku-5-5"
 map = "claude-sonnet-5-5"
 vision = "claude-sonnet-5-5"
 summary = "claude-sonnet-5-5"
-whisper_live = "mlx-community/whisper-large-v3-turbo"
-whisper_fallback = "mlx-community/whisper-small-mlx"
-whisper_final = "mlx-community/whisper-large-v3-mlx"
+# Whisper : laisser commenté pour les valeurs par défaut de la machine.
+# Mac Apple Silicon (mlx-whisper) :
+# whisper_live = "mlx-community/whisper-large-v3-turbo"
+# whisper_fallback = "mlx-community/whisper-small-mlx"
+# whisper_final = "mlx-community/whisper-large-v3-mlx"
+# Windows / Linux (faster-whisper, GPU NVIDIA utilisé s'il est présent) :
+# whisper_live = "large-v3-turbo"
+# whisper_fallback = "small"
+# whisper_final = "large-v3"
 
 [map]
 interval_seconds = 20

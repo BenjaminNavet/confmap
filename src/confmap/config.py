@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import platform
+import sys
 import tomllib
 from pathlib import Path
 
@@ -11,6 +13,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 
+# Whisper (direct, secours, finalisation) : mlx sur Mac Apple Silicon, faster-whisper ailleurs.
+if sys.platform == "darwin" and platform.machine() == "arm64":
+    _WHISPER_DEFAULTS = (
+        "mlx-community/whisper-large-v3-turbo",
+        "mlx-community/whisper-small-mlx",
+        "mlx-community/whisper-large-v3-mlx",
+    )
+else:
+    _WHISPER_DEFAULTS = ("large-v3-turbo", "small", "large-v3")
+
+
 class ModelsConfig(BaseModel):
     """Modèles utilisés par chaque étape."""
 
@@ -18,9 +31,9 @@ class ModelsConfig(BaseModel):
     map: str = "claude-sonnet-5-5"
     vision: str = "claude-sonnet-5-5"
     summary: str = "claude-sonnet-5-5"
-    whisper_live: str = "mlx-community/whisper-large-v3-turbo"
-    whisper_fallback: str = "mlx-community/whisper-small-mlx"
-    whisper_final: str = "mlx-community/whisper-large-v3-mlx"
+    whisper_live: str = _WHISPER_DEFAULTS[0]
+    whisper_fallback: str = _WHISPER_DEFAULTS[1]
+    whisper_final: str = _WHISPER_DEFAULTS[2]
 
 
 class MapConfig(BaseModel):

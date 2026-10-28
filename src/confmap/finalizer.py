@@ -16,7 +16,7 @@ import soundfile
 from confmap.events import FinalizeStepEvent, SegmentEvent, TranslationEvent
 from confmap.llm import LlmError
 from confmap.runtime import SessionRuntime
-from confmap.transcriber import MlxWhisperTranscriber, build_initial_prompt
+from confmap.transcriber import WhisperTranscriber, build_initial_prompt
 from confmap.translator import SegmentToTranslate, translate_batch
 from confmap.vault_writer import (
     FinalNoteData,
@@ -180,7 +180,7 @@ class Finalizer:
 
     async def _retranscribe(self) -> dict:
         transcriber = self.runtime.transcriber
-        if not isinstance(transcriber, MlxWhisperTranscriber):
+        if not isinstance(transcriber, WhisperTranscriber):
             return {"skipped": True}
         started_wall = time.time()
         live_languages = Counter(s.lang for s in self.runtime.state.segments.values())

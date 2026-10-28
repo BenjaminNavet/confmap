@@ -18,7 +18,7 @@ def build_services(config_path: Path | None, audio_file: Path | None, speed: flo
     from confmap.llm import ClaudeCliClient
     from confmap.segmenter import SileroDetector
     from confmap.session_store import SessionStore
-    from confmap.transcriber import MlxWhisperTranscriber
+    from confmap.transcriber import create_transcriber
     from confmap.web.app import AppServices
 
     settings = load_settings(config_path)
@@ -32,7 +32,7 @@ def build_services(config_path: Path | None, audio_file: Path | None, speed: flo
         settings=settings,
         store=SessionStore(settings.paths.sessions),
         llm=ClaudeCliClient(),
-        transcriber=MlxWhisperTranscriber(
+        transcriber=create_transcriber(
             settings.models.whisper_live, settings.models.whisper_fallback
         ),
         detector_factory=SileroDetector,

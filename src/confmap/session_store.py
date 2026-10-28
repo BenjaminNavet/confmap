@@ -61,7 +61,7 @@ class SessionLog:
     def save_meta(self) -> None:
         """Réécrit `session.json`."""
         (self.directory / "session.json").write_text(
-            self.meta.model_dump_json(indent=2)
+            self.meta.model_dump_json(indent=2), encoding="utf-8"
         )
 
     def is_finalized(self) -> bool:
@@ -121,7 +121,8 @@ class SessionStore:
         if not meta_path.exists():
             raise KeyError(session_id)
         session = SessionLog(
-            directory, SessionMeta.model_validate_json(meta_path.read_text())
+            directory,
+            SessionMeta.model_validate_json(meta_path.read_text(encoding="utf-8")),
         )
         self._open[session_id] = session
         return session

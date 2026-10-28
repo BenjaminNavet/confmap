@@ -45,7 +45,7 @@ def start_server(log_path: Path) -> subprocess.Popen:
     """Lance confmap sur le port du juge avec un vault et des sessions isolés."""
     for name in ("vault", "sessions"):
         shutil.rmtree(JUDGE_DIR / name, ignore_errors=True)
-    log = log_path.open("w")
+    log = log_path.open("w", encoding="utf-8")
     process = subprocess.Popen(
         [
             "uv",
@@ -201,7 +201,7 @@ def capture_ui(out: Path) -> None:
             console.append(
                 f"banc: menu Finalisations inaccessible ({error.__class__.__name__})"
             )
-        (out / "console.log").write_text("\n".join(console))
+        (out / "console.log").write_text("\n".join(console), encoding="utf-8")
         browser.close()
 
 
@@ -213,10 +213,12 @@ def render_vault(out: Path) -> None:
         return
     shutil.copytree(JUDGE_DIR / "vault", vault_out)
     for note in vault_out.rglob("*.md"):
-        blocks = re.findall(r"```mermaid\n(.*?)```", note.read_text(), flags=re.S)
+        blocks = re.findall(
+            r"```mermaid\n(.*?)```", note.read_text(encoding="utf-8"), flags=re.S
+        )
         for number, block in enumerate(blocks, 1):
             source = out / f"mermaid-{number}.mmd"
-            source.write_text(block)
+            source.write_text(block, encoding="utf-8")
             subprocess.run(
                 [
                     "mmdc",
@@ -235,11 +237,14 @@ def render_vault(out: Path) -> None:
             )
         import markdown
 
-        body = markdown.markdown(note.read_text(), extensions=["tables", "fenced_code"])
+        body = markdown.markdown(
+            note.read_text(encoding="utf-8"), extensions=["tables", "fenced_code"]
+        )
         (out / "note-rendue.html").write_text(
             "<html><body style='background:#1e1e1e;color:#ddd;font:15px system-ui;max-width:760px;margin:auto'>"
             + body
-            + "</body></html>"
+            + "</body></html>",
+            encoding="utf-8",
         )
     for canvas in vault_out.rglob("*.canvas"):
         render_canvas(canvas, out / "canvas.png")
@@ -247,7 +252,7 @@ def render_vault(out: Path) -> None:
 
 def render_canvas(canvas_path: Path, png_path: Path) -> None:
     """Rend un .canvas Obsidian (nœuds texte, groupes, arêtes) en PNG, à la manière d'Obsidian."""
-    data = json.loads(canvas_path.read_text())
+    data = json.loads(canvas_path.read_text(encoding="utf-8"))
     nodes = data.get("nodes", [])
     if not nodes:
         return
@@ -293,7 +298,7 @@ padding:8px;color:#ddd;font:14px system-ui;overflow:hidden;white-space:pre-wrap}
 <svg width='{width}' height='{height}' style='position:absolute;left:0;top:0'><defs><marker id='a' markerWidth='10' markerHeight='10' refX='9' refY='3' orient='auto'><path d='M0,0 L9,3 L0,6' fill='#888'/></marker></defs>{"".join(lines)}</svg>
 </div></body></html>"""
     html_path = png_path.with_suffix(".html")
-    html_path.write_text(html)
+    html_path.write_text(html, encoding="utf-8")
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         page = browser.new_page(

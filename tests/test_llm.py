@@ -120,7 +120,7 @@ def test_build_args_schema(client):
     with_schema = client.build_args("m", "sys", schema, with_images=False)
     assert with_schema[with_schema.index("--json-schema") + 1] == json.dumps(schema)
     assert with_schema[with_schema.index("--model") + 1] == "m"
-    assert with_schema[with_schema.index("--system-prompt") + 1] == "sys"
+    assert with_schema[with_schema.index("--system-prompt-file") + 1] == "sys"
 
 
 def test_build_args_images_use_stream_json(client):

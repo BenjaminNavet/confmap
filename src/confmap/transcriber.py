@@ -1,10 +1,12 @@
-"""Transcription locale avec mlx-whisper (un seul thread : mlx n'aime pas la concurrence)."""
+"""Transcription locale avec Whisper : mlx-whisper sur Mac Apple Silicon, faster-whisper ailleurs."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import platform
 import re
+import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -115,11 +117,15 @@ def is_hallucination(text: str) -> bool:
     return len(words) >= 8 and len(set(words)) <= len(words) / 4
 
 
-class MlxWhisperTranscriber:
-    """mlx-whisper avec stabilisation de la langue et bascule vers un modèle léger.
+class WhisperTranscriber:
+    """Whisper local avec stabilisation de la langue et bascule vers un modèle léger.
+
+    Un seul thread de calcul : les moteurs n'aiment pas la concurrence. Les
+    sous-classes fournissent `_run` (segment) et `_run_file` (fichier entier),
+    qui retournent un dict au format de whisper (`language`, `text`, `segments`).
 
     Args:
-        model: Dépôt Hugging Face du modèle principal.
+        model: Modèle principal.
         fallback_model: Modèle plus léger utilisé si le retard devient trop grand.
     """
 
@@ -159,7 +165,7 @@ class MlxWhisperTranscriber:
         result = await loop.run_in_executor(
             self._executor,
             self._run,
-            samples,
+            samples.astype(np.float32),
             language,
             self.active_model,
             self.initial_prompt,
@@ -179,20 +185,9 @@ class MlxWhisperTranscriber:
     ) -> tuple[str, list[TimedText]]:
         """Transcription complète d'un fichier (finalisation)."""
         loop = asyncio.get_running_loop()
-
-        def run() -> dict:
-            import mlx_whisper
-
-            return mlx_whisper.transcribe(
-                str(path),
-                path_or_hf_repo=model,
-                language=language,
-                initial_prompt=initial_prompt,
-                condition_on_previous_text=False,
-                verbose=None,
-            )
-
-        result = await loop.run_in_executor(self._executor, run)
+        result = await loop.run_in_executor(
+            self._executor, self._run_file, path, model, language, initial_prompt
+        )
         pieces = [
             TimedText(float(s["start"]), float(s["end"]), str(s["text"]).strip())
             for s in result.get("segments", [])
@@ -200,17 +195,33 @@ class MlxWhisperTranscriber:
         ]
         return str(result.get("language") or language or "und"), pieces
 
-    @staticmethod
     def _run(
+        self,
         samples: np.ndarray,
         language: str | None,
         model: str,
-        initial_prompt: str | None = None,
+        initial_prompt: str | None,
     ) -> dict:
+        raise NotImplementedError
+
+    def _run_file(
+        self,
+        path: Path,
+        model: str,
+        language: str | None,
+        initial_prompt: str | None,
+    ) -> dict:
+        raise NotImplementedError
+
+
+class MlxWhisperTranscriber(WhisperTranscriber):
+    """Moteur mlx-whisper (Mac Apple Silicon, GPU Metal)."""
+
+    def _run(self, samples, language, model, initial_prompt):  # noqa: D102
         import mlx_whisper
 
         return mlx_whisper.transcribe(
-            samples.astype(np.float32),
+            samples,
             path_or_hf_repo=model,
             language=language,
             initial_prompt=initial_prompt,
@@ -219,3 +230,80 @@ class MlxWhisperTranscriber:
             temperature=0.0,
             no_speech_threshold=0.6,
         )
+
+    def _run_file(self, path, model, language, initial_prompt):  # noqa: D102
+        import mlx_whisper
+
+        return mlx_whisper.transcribe(
+            str(path),
+            path_or_hf_repo=model,
+            language=language,
+            initial_prompt=initial_prompt,
+            condition_on_previous_text=False,
+            verbose=None,
+        )
+
+
+class FasterWhisperTranscriber(WhisperTranscriber):
+    """Moteur faster-whisper (Windows, Linux, Mac Intel ; GPU CUDA si disponible).
+
+    Les modèles se nomment `large-v3-turbo`, `small`, `large-v3`… (téléchargés
+    depuis Hugging Face au premier usage) et restent chargés en mémoire.
+    """
+
+    def __init__(self, model: str, fallback_model: str) -> None:
+        """Prépare le thread et le cache des modèles chargés."""
+        super().__init__(model, fallback_model)
+        self._models: dict[str, object] = {}
+
+    def _load(self, name: str):
+        if name not in self._models:
+            from faster_whisper import WhisperModel
+
+            # "auto" : CUDA si présent, sinon CPU, avec le type de calcul le plus rapide (int8 sur CPU).
+            self._models[name] = WhisperModel(
+                name, device="auto", compute_type="auto"
+            )
+        return self._models[name]
+
+    def _transcribe(self, audio, model, language, initial_prompt, **options) -> dict:
+        segments, info = self._load(model).transcribe(
+            audio,
+            language=language,
+            initial_prompt=initial_prompt,
+            condition_on_previous_text=False,
+            **options,
+        )
+        pieces = [{"start": s.start, "end": s.end, "text": s.text} for s in segments]
+        return {
+            "language": info.language,
+            "text": "".join(piece["text"] for piece in pieces),
+            "segments": pieces,
+        }
+
+    def _run(self, samples, language, model, initial_prompt):  # noqa: D102
+        return self._transcribe(
+            samples,
+            model,
+            language,
+            initial_prompt,
+            temperature=0.0,
+            no_speech_threshold=0.6,
+        )
+
+    def _run_file(self, path, model, language, initial_prompt):  # noqa: D102
+        from confmap.audio import load_audio_16k
+
+        return self._transcribe(load_audio_16k(path), model, language, initial_prompt)
+
+
+def mlx_available() -> bool:
+    """Vrai sur un Mac Apple Silicon (seule plateforme de mlx)."""
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def create_transcriber(model: str, fallback_model: str) -> WhisperTranscriber:
+    """Choisit le moteur adapté à la machine."""
+    if mlx_available():
+        return MlxWhisperTranscriber(model, fallback_model)
+    return FasterWhisperTranscriber(model, fallback_model)

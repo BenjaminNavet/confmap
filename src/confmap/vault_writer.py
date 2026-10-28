@@ -51,7 +51,7 @@ LEVEL_GAP = 90
 LEVEL_NODE_GAP = 50
 BOX_MARGIN = 30
 
-_FORBIDDEN_TITLE_CHARS = re.compile(r'[/\\:*?"<>|#^\[\]]')
+_FORBIDDEN_TITLE_CHARS = re.compile(r'[/\\:*?"<>|#^\[\]\x00-\x1f]')
 # Entités Mermaid : une étiquette entre guillemets ne doit contenir ni " ni # brut.
 _MERMAID_ENTITIES = str.maketrans(
     {"#": "#35;", '"': "#quot;", "<": "#lt;", ">": "#gt;", "\n": " ", "\r": " "}
@@ -123,7 +123,7 @@ def sanitize_title(title: str) -> str:
     """
     cleaned = _FORBIDDEN_TITLE_CHARS.sub("", title)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    cleaned = cleaned[:MAX_TITLE_LENGTH].strip()
+    cleaned = cleaned[:MAX_TITLE_LENGTH].rstrip(". ").strip()
     return cleaned or FALLBACK_TITLE
 
 
