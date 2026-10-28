@@ -15,13 +15,13 @@ def build_services(config_path: Path | None, audio_file: Path | None, speed: flo
     """Assemble les vraies dépendances de l'application."""
     from confmap.audio import FileSource, MicrophoneSource
     from confmap.config import load_settings
-    from confmap.llm import ClaudeCliClient
     from confmap.segmenter import SileroDetector
     from confmap.session_store import SessionStore
     from confmap.transcriber import create_transcriber
     from confmap.web.app import AppServices
 
     settings = load_settings(config_path)
+    backend = resolve_llm_backend(settings.llm.backend)
 
     def audio_source_factory():
         if audio_file is not None:
@@ -31,13 +31,42 @@ def build_services(config_path: Path | None, audio_file: Path | None, speed: flo
     return AppServices(
         settings=settings,
         store=SessionStore(settings.paths.sessions),
-        llm=ClaudeCliClient(),
+        llm=create_llm_client(backend),
+        llm_backend=backend,
         transcriber=create_transcriber(
             settings.models.whisper_live, settings.models.whisper_fallback
         ),
         detector_factory=SileroDetector,
         audio_source_factory=audio_source_factory,
     )
+
+
+def resolve_llm_backend(backend: str) -> str:
+    """`claude` ou `openrouter` ; en mode `auto`, la CLI est préférée si `claude` est dans le PATH."""
+    import os
+    import shutil
+
+    from confmap.llm import LlmError
+    from confmap.openrouter import API_KEY_VARIABLE
+
+    if backend != "auto":
+        return backend
+    if shutil.which("claude"):
+        return "claude"
+    if os.environ.get(API_KEY_VARIABLE):
+        return "openrouter"
+    raise LlmError(
+        f"ni Claude Code (`claude`) ni clé {API_KEY_VARIABLE} : voir le README, section « Claude »"
+    )
+
+
+def create_llm_client(backend: str):
+    """Backend LLM : CLI Claude Code (abonnement) ou OpenRouter (clé API)."""
+    from confmap.llm import ClaudeCliClient
+    from confmap.openrouter import OpenRouterClient
+
+    logging.getLogger("confmap").info("appels LLM via %s", backend)
+    return ClaudeCliClient() if backend == "claude" else OpenRouterClient()
 
 
 def port_in_use(port: int) -> bool:
@@ -80,9 +109,14 @@ def main() -> None:
 
     import uvicorn
 
+    from confmap.llm import LlmError
     from confmap.web.app import create_app
 
-    services = build_services(args.config, args.audio_file, args.speed)
+    try:
+        services = build_services(args.config, args.audio_file, args.speed)
+    except LlmError as error:
+        print(f"confmap : {error}", file=sys.stderr)
+        sys.exit(1)
     if args.port:
         services.settings.server.port = args.port
     port = services.settings.server.port

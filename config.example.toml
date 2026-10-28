@@ -1,10 +1,17 @@
 # Copier en config.toml et adapter.
 
+[llm]
+# "auto" : Claude Code si `claude` est dans le PATH, sinon OpenRouter (OPENROUTER_API_KEY dans .env).
+backend = "auto"
+
 [models]
-translate = "claude-haiku-5-5"
-map = "claude-sonnet-5-5"
-vision = "claude-sonnet-5-5"
-summary = "claude-sonnet-5-5"
+# Modèles LLM : se choisissent aussi dans l'interface (⚙ Réglages). Une ligne
+# décommentée ici passe avant le choix fait dans l'interface.
+# Avec OpenRouter, les défauts sont deepseek/deepseek-v4-pro (et deepseek/deepseek-v4.1-flash pour vision).
+# translate = "claude-haiku-5-5"
+# map = "claude-sonnet-5-5"
+# vision = "claude-sonnet-5-5"
+# summary = "claude-sonnet-5-5"
 # Whisper : laisser commenté pour les valeurs par défaut de la machine.
 # Mac Apple Silicon (mlx-whisper) :
 # whisper_live = "mlx-community/whisper-large-v3-turbo"
@@ -22,7 +29,8 @@ max_nodes_per_topic = 8
 max_topic_seconds = 300
 
 [paths]
-vault = "~/Documents/Obsidian Vault/Conferences"
+# Dossier des notes ; sans cette ligne : vault Obsidian par défaut, ou choix dans l'interface.
+# vault = "~/Documents/Obsidian Vault/Conferences"
 # sessions = "~/dev/confmap/sessions"
 
 [server]

@@ -104,9 +104,10 @@ def test_is_finalized(tmp_path):
     assert SessionStore(tmp_path).load(session.id).is_finalized()
 
 
-def test_default_vault_path_is_expanded():
+def test_vault_path_is_expanded():
     from confmap.config import Settings
 
-    settings = Settings()
+    settings = Settings.model_validate({"paths": {"vault": "~/Notes"}})
     assert "~" not in str(settings.paths.vault)
     assert settings.paths.vault.is_absolute()
+    assert Settings().paths.vault is None

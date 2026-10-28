@@ -92,6 +92,7 @@ function goHome() {
 
 async function showHome() {
   $("home").classList.remove("hidden");
+  loadSettings();
   const list = $("sessionList");
   list.innerHTML = "";
   let sessions = [];
@@ -108,6 +109,93 @@ async function showHome() {
     open.onclick = () => openSession(session.id);
     li.appendChild(open);
     list.appendChild(li);
+  }
+}
+
+// ---------- réglages : dossier des notes, modèles ----------
+
+const SOURCE_LABELS = { config: "fixé dans config.toml", choice: "choisi ici", obsidian: "vault Obsidian par défaut", default: "par défaut" };
+
+function formatPrice(model) {
+  const fmt = (value) => value.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+  return `${fmt(model.input_price)} $ entrée · ${fmt(model.output_price)} $ sortie, par million de tokens`;
+}
+
+async function loadSettings() {
+  try {
+    renderDestination(await api("/api/destination"));
+    renderModels(await api("/api/models"));
+  } catch (error) { toast(error.message); }
+}
+
+function renderDestination(state) {
+  const input = $("destInput");
+  if (document.activeElement !== input) input.value = state.folder || state.suggestion;
+  const locked = state.source === "config";
+  input.disabled = locked;
+  $("destSaveBtn").disabled = locked;
+  $("destWarning").classList.toggle("hidden", Boolean(state.folder));
+  $("destStatus").textContent = state.folder ? `Notes écrites dans ${state.folder} (${SOURCE_LABELS[state.source]}).` : "Aucun dossier choisi.";
+  $("newBtn").disabled = !state.folder;
+  $("newBtn").title = state.folder ? "" : "Choisir d'abord le dossier des notes (Réglages)";
+  if (!state.folder) $("settingsBox").open = true;
+}
+
+async function saveDestination() {
+  try {
+    renderDestination(await api("/api/destination", { method: "POST", body: JSON.stringify({ folder: $("destInput").value }) }));
+    toast("Dossier des notes enregistré");
+  } catch (error) { toast(error.message, 5000); }
+}
+
+function fillDatalist(id, models) {
+  const list = $(id);
+  list.innerHTML = "";
+  for (const model of models) {
+    const option = document.createElement("option");
+    option.value = model.id;
+    option.label = `${model.name} — ${formatPrice(model)}`;
+    list.appendChild(option);
+  }
+}
+
+function renderModels(state) {
+  ui.catalog = new Map(state.catalog.map((model) => [model.id, model]));
+  fillDatalist("modelsAll", state.catalog);
+  fillDatalist("modelsImages", state.catalog.filter((model) => model.images));
+  $("backendLabel").textContent = state.backend === "openrouter" ? "· via OpenRouter (clé API)" : "· via Claude Code (abonnement)";
+  const container = $("modelList");
+  container.innerHTML = "";
+  for (const step of state.steps) {
+    const block = document.createElement("div");
+    block.className = "model-step";
+    block.innerHTML = `<div class="settings-row"><span>${escapeHtml(step.label)}</span><input class="ctx" autocomplete="off" spellcheck="false"><button class="btn" title="Revenir au modèle par défaut (${escapeHtml(step.default)})">Défaut</button></div><div class="settings-hint"></div>`;
+    const input = block.querySelector("input");
+    const reset = block.querySelector("button");
+    const hint = block.querySelector(".settings-hint");
+    input.value = step.model;
+    input.setAttribute("list", step.needs_images ? "modelsImages" : "modelsAll");
+    const locked = step.source === "config";
+    input.disabled = locked;
+    reset.disabled = locked || step.source === "default";
+    const describe = () => {
+      const model = ui.catalog.get(input.value.trim());
+      const price = model ? formatPrice(model) : state.catalog.length ? "prix inconnu pour ce modèle" : "catalogue indisponible (hors ligne)";
+      const images = step.needs_images && model && !model.images ? " · ⚠ ne lit pas les images" : "";
+      hint.textContent = `${price}${images} · ${SOURCE_LABELS[step.source]}`;
+    };
+    describe();
+    input.oninput = describe;
+    const save = async (value) => {
+      if (value === step.model) return;
+      try {
+        renderModels(await api("/api/models", { method: "POST", body: JSON.stringify({ step: step.step, model: value }) }));
+        toast(`${step.label} : ${value || "modèle par défaut"}`);
+      } catch (error) { toast(error.message, 5000); }
+    };
+    input.onchange = () => save(input.value.trim());
+    reset.onclick = () => save("");
+    container.appendChild(block);
   }
 }
 
@@ -720,6 +808,8 @@ function init() {
     },
   });
   $("newBtn").onclick = newSession;
+  $("destSaveBtn").onclick = saveDestination;
+  $("destInput").addEventListener("keydown", (event) => { if (event.key === "Enter") saveDestination(); });
   $("homeBtn").onclick = goHome;
   $("brand").onclick = goHome;
   $("finalNewBtn").onclick = () => { goHome(); newSession(); };

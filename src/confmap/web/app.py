@@ -10,7 +10,7 @@ import socket
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import qrcode
 import qrcode.image.svg
@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from confmap.audio import AudioSource
 from confmap.config import Settings
+from confmap.destination import SUGGESTED_FOLDER, Destination
 from confmap.events import (
     FinalizeStepEvent,
     SegmentEvent,
@@ -39,6 +40,7 @@ from confmap.events import (
 )
 from confmap.finalizer import Finalizer
 from confmap.llm import LlmClient
+from confmap.model_choice import ModelChoices
 from confmap.runtime import SessionRuntime
 from confmap.segmenter import SpeechDetector
 from confmap.session_store import SessionLog, SessionStore
@@ -61,6 +63,11 @@ class AppServices:
     transcriber: Transcriber
     detector_factory: Callable[[], SpeechDetector]
     audio_source_factory: Callable[[], AudioSource]
+    # Présence d'Obsidian ; détectée si None (forcée dans les tests).
+    obsidian: bool | None = None
+    llm_backend: str = "claude"
+    # Transport httpx du catalogue des modèles (tests, sans réseau).
+    catalog_transport: Any = None
     runtimes: dict[str, SessionRuntime] = field(default_factory=dict)
     finalize_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
 
@@ -98,6 +105,19 @@ class NoteBody(BaseModel):
     """Note libre."""
 
     text: str
+
+
+class DestinationBody(BaseModel):
+    """Dossier des notes choisi dans l'interface."""
+
+    folder: str
+
+
+class ModelBody(BaseModel):
+    """Modèle choisi pour une étape (vide : revenir au défaut)."""
+
+    step: str
+    model: str
 
 
 class PositionsBody(BaseModel):
@@ -335,8 +355,44 @@ def create_app(services: AppServices) -> FastAPI:
         ]
         return [status for status in statuses if not status["recording"]]
 
+    destination = Destination(services.settings, services.obsidian)
+
+    @app.get("/api/destination")
+    async def get_destination(_: LocalOnly) -> dict:
+        return destination.describe()
+
+    @app.post("/api/destination")
+    async def set_destination(body: DestinationBody, _: LocalOnly) -> dict:
+        if destination.resolve()[1] == "config":
+            raise HTTPException(409, "dossier fixé par [paths] vault dans config.toml")
+        try:
+            destination.choose(body.folder)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return destination.describe()
+
+    model_choices = ModelChoices(
+        services.settings, services.llm_backend, services.catalog_transport
+    )
+
+    @app.get("/api/models")
+    async def get_models(_: LocalOnly) -> dict:
+        return await model_choices.describe()
+
+    @app.post("/api/models")
+    async def set_model(body: ModelBody, _: LocalOnly) -> dict:
+        try:
+            model_choices.choose(body.step, body.model)
+        except KeyError as error:
+            raise HTTPException(400, "étape inconnue") from error
+        except PermissionError as error:
+            raise HTTPException(409, str(error)) from error
+        return await model_choices.describe()
+
     @app.post("/api/sessions")
     async def create_session(_: LocalOnly) -> dict:
+        if destination.folder is None:
+            raise HTTPException(409, "choisir d'abord le dossier des notes")
         if services.recording_session_id():
             raise HTTPException(409, "une session enregistre déjà")
         session = services.store.create()
@@ -437,7 +493,11 @@ def create_app(services: AppServices) -> FastAPI:
         if runtime.recording:
             await runtime.stop_recording()
         await runtime.drain()
-        await Finalizer(runtime, services.settings.paths.vault).run()
+        folder = destination.folder
+        if folder is None:  # session créée avant un changement de réglages
+            log.warning("aucun dossier des notes choisi : %s", SUGGESTED_FOLDER)
+            folder = SUGGESTED_FOLDER
+        await Finalizer(runtime, folder).run()
 
     def launch_finalization(session_id: str) -> None:
         task = services.finalize_tasks.get(session_id)

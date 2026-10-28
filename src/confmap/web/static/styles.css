@@ -256,6 +256,16 @@ body {
 .hidden { display: none !important; }
 
 .row-start { justify-content: flex-start; }
+.settings { margin-top: 18px; border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+.settings summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.settings[open] summary { margin-bottom: 10px; }
+.settings-label { display: block; margin: 12px 0 4px; font-weight: 600; font-size: 13px; }
+.settings-row { display: flex; gap: 8px; align-items: center; }
+.settings-row .ctx { flex: 1 1 auto; min-width: 0; }
+.settings-hint { color: var(--muted); font-size: 12px; font-weight: 400; margin-top: 3px; }
+.settings-warning { color: var(--danger); margin: 0 0 6px; font-size: 13px; }
+.model-step { margin-top: 8px; }
+.model-step .settings-row span:first-child { flex: 0 0 120px; font-size: 13px; }
 .finals-card { width: min(740px, 100%); }
 .finals-list { list-style: none; padding: 0; margin: 0; }
 .finals-list li { padding: 12px 0; border-bottom: 1px solid var(--border); }

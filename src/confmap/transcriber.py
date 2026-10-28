@@ -261,9 +261,7 @@ class FasterWhisperTranscriber(WhisperTranscriber):
             from faster_whisper import WhisperModel
 
             # "auto" : CUDA si présent, sinon CPU, avec le type de calcul le plus rapide (int8 sur CPU).
-            self._models[name] = WhisperModel(
-                name, device="auto", compute_type="auto"
-            )
+            self._models[name] = WhisperModel(name, device="auto", compute_type="auto")
         return self._models[name]
 
     def _transcribe(self, audio, model, language, initial_prompt, **options) -> dict:

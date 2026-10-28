@@ -13,6 +13,7 @@ def services(store, speech_wav, tmp_path):
     settings.map.interval_seconds = 0.2
     settings.map.min_gap_seconds = 0
     settings.paths.vault = tmp_path / "vault"
+    settings.paths.preferences = tmp_path / "preferences.json"
     return AppServices(
         settings=settings,
         store=store,
@@ -195,3 +196,56 @@ async def test_finalizations_menu(services):
     assert item["id"] == session_id and item["state"] == "done"
     assert item["steps"]["write"]["state"] == "done"
     assert item["output_path"]
+
+
+def test_web_requires_choice_without_obsidian(services, tmp_path):
+    services.settings.paths.vault = None
+    services.settings.paths.preferences = tmp_path / "preferences.json"
+    services.obsidian = False
+    with TestClient(create_app(services)) as client:
+        state = client.get("/api/destination").json()
+        assert state["folder"] is None and state["obsidian"] is False
+        assert client.post("/api/sessions").status_code == 409
+        assert (
+            client.post("/api/destination", json={"folder": "relatif"}).status_code
+            == 400
+        )
+        chosen = client.post(
+            "/api/destination", json={"folder": str(tmp_path / "notes")}
+        )
+        assert chosen.json() == {
+            **state,
+            "folder": str(tmp_path / "notes"),
+            "source": "choice",
+        }
+        assert client.post("/api/sessions").status_code == 200
+
+
+def test_web_config_folder_is_locked(client):
+    assert client.get("/api/destination").json()["source"] == "config"
+    assert client.post("/api/destination", json={"folder": "/tmp/x"}).status_code == 409
+
+
+def test_web_model_choice(services, tmp_path):
+    import httpx
+
+    services.settings.paths.preferences = tmp_path / "preferences.json"
+    services.llm_backend = "openrouter"
+    services.catalog_transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"data": []})
+    )
+    with TestClient(create_app(services)) as client:
+        state = client.get("/api/models").json()
+        assert state["backend"] == "openrouter"
+        assert {s["step"]: s["model"] for s in state["steps"]}[
+            "map"
+        ] == "deepseek/deepseek-v4-pro"
+        changed = client.post(
+            "/api/models", json={"step": "map", "model": "openai/gpt-5"}
+        )
+        assert changed.status_code == 200
+        assert services.settings.models.map == "openai/gpt-5"
+        assert (
+            client.post("/api/models", json={"step": "x", "model": "a"}).status_code
+            == 400
+        )

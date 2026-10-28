@@ -6,6 +6,7 @@ import platform
 import sys
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -51,13 +52,26 @@ class PathsConfig(BaseModel):
     # Sans cela, Pydantic ne passe pas les valeurs par défaut au validateur : « ~ » resterait littéral.
     model_config = ConfigDict(validate_default=True)
 
-    vault: Path = Path("~/Documents/Obsidian Vault/Conferences")
+    # Dossier des notes ; absent : choix fait dans l'interface, ou vault Obsidian par défaut.
+    vault: Path | None = None
     sessions: Path = PROJECT_ROOT / "sessions"
+    # Choix de l'utilisateur fait dans l'interface (dossier des notes).
+    preferences: Path = PROJECT_ROOT / "preferences.json"
 
-    @field_validator("vault", "sessions", mode="after")
+    @field_validator("vault", "sessions", "preferences", mode="after")
     @classmethod
-    def _expand_user(cls, path: Path) -> Path:
-        return path.expanduser()
+    def _expand_user(cls, path: Path | None) -> Path | None:
+        return path.expanduser() if path is not None else None
+
+
+class LlmConfig(BaseModel):
+    """Backend des appels à Claude.
+
+    `auto` : la CLI Claude Code si `claude` est dans le PATH, sinon OpenRouter
+    si `OPENROUTER_API_KEY` est définie.
+    """
+
+    backend: Literal["auto", "claude", "openrouter"] = "auto"
 
 
 class ServerConfig(BaseModel):
@@ -73,6 +87,7 @@ class Settings(BaseModel):
     models: ModelsConfig = ModelsConfig()
     map: MapConfig = MapConfig()
     paths: PathsConfig = PathsConfig()
+    llm: LlmConfig = LlmConfig()
     server: ServerConfig = ServerConfig()
 
 

@@ -68,6 +68,20 @@
       <button id="newBtn" class="btn btn-primary">● Nouvelle session</button>
       <button id="homeFinalsBtn" class="btn">📋 Finalisations</button>
     </div>
+    <details id="settingsBox" class="settings">
+      <summary>⚙ Réglages</summary>
+      <p id="destWarning" class="settings-warning hidden">Obsidian n'est pas installé : choisir le dossier où écrire les notes de conférence.</p>
+      <label class="settings-label" for="destInput">Dossier des notes</label>
+      <div class="settings-row">
+        <input id="destInput" class="ctx" autocomplete="off" spellcheck="false">
+        <button id="destSaveBtn" class="btn">Enregistrer</button>
+      </div>
+      <div id="destStatus" class="settings-hint"></div>
+      <div class="settings-label">Modèles <span id="backendLabel" class="settings-hint"></span></div>
+      <div id="modelList"></div>
+      <datalist id="modelsAll"></datalist>
+      <datalist id="modelsImages"></datalist>
+    </details>
     <h2>Sessions</h2>
     <ul id="sessionList" class="session-list"></ul>
   </div>
